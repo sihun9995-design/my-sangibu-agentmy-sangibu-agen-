@@ -16,7 +16,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# 🎨 이미지의 그린/토끼 컨셉을 반영한 커스텀 CSS
+# 🎨 그린/토끼 컨셉 반영 및 테두리 상자(Container) 내부 정렬용 커스텀 CSS
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap');
@@ -50,31 +50,21 @@ st.markdown("""
         font-weight: 500;
     }
     
-    /* 화이트 카드 컴포넌트 */
-    .green-card {
-        background: white;
-        padding: 1.5rem;
-        border-radius: 12px;
-        border: 1px solid #C8E6C9;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-        margin-bottom: 1rem;
-        min-height: 280px;
-    }
-    
-    .green-card-wide {
-        background: white;
-        padding: 1.5rem;
-        border-radius: 12px;
-        border: 1px solid #C8E6C9;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.04);
-        margin-bottom: 1.5rem;
+    /* ⭐ 스트림릿 기본 테두리 상자를 화이트 카드로 커스텀 리모델링 (내부 가두기 핵심) */
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        background-color: white !important;
+        border: 1px solid #C8E6C9 !important;
+        border-radius: 12px !important;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.04) !important;
+        padding: 1.8rem !important;
+        margin-bottom: 1rem !important;
     }
     
     .card-title {
         font-size: 1.3rem;
         font-weight: 700;
         color: #1B5E20;
-        margin-bottom: 1rem;
+        margin-bottom: 1.2rem;
         border-bottom: 2px solid #A5D6A7;
         padding-bottom: 0.5rem;
     }
@@ -85,19 +75,12 @@ st.markdown("""
         padding: 0.6rem 0.8rem;
         border-radius: 8px;
         border: 1px solid #E8F5E9;
-        margin-bottom: 0.5rem;
+        margin-bottom: 0.6rem;
         font-size: 0.95rem;
         color: #374151;
     }
     
-    /* 하단 중앙 정렬 대형 버튼 스타일 */
-    .center-btn-container {
-        display: flex;
-        justify-content: center;
-        margin-top: 1.5rem;
-        margin-bottom: 2rem;
-    }
-    
+    /* 버튼 스타일 디자인 */
     .stButton>button {
         background: linear-gradient(135deg, #2E7D32 0%, #1B5E20 100%) !important;
         color: white !important;
@@ -130,7 +113,6 @@ with st.sidebar:
     st.markdown("---")
     openai_api_key = st.text_input("OpenAI API Key 입력", type="password", placeholder="sk-proj-...")
     
-    st.markdown("### 📊 글자 수 설정")
     max_bytes = st.slider(
         "최대 허용 바이트 (나이스 한도: 1500)",
         min_value=1000, max_value=1450, value=1350, step=50
@@ -142,37 +124,39 @@ with st.sidebar:
 col1, col2 = st.columns([1, 1])
 
 with col1:
-    st.markdown('<div class="green-card"><div class="card-title">🐰 1. 데이터 업로드</div>', unsafe_allow_html=True)
-    uploaded_file = st.file_uploader("학생 데이터 엑셀 파일(.xlsx)을 선택하세요", type=["xlsx"])
-    
-    # 샘플 파일 다운로드
-    sample_df = pd.DataFrame({
-        "학번": [10101, 10102],
-        "이름": ["홍길동", "이순신"],
-        "보고서내용": ["자율주행 자동차의 윤리적 딜레마 보고서를 제출함.", "효소 촉매 반응 실험을 주도하고 시각화함."]
-    })
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-        sample_df.to_excel(writer, index=False)
+    # 테두리 컨테이너 내부로 업로더와 샘플 다운로드를 완벽히 격리
+    with st.container(border=True):
+        st.markdown('<div class="card-title">🐰 1. 데이터 업로드</div>', unsafe_allow_html=True)
+        uploaded_file = st.file_uploader("학생 데이터 엑셀 파일(.xlsx)을 선택하세요", type=["xlsx"])
         
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.download_button(
-        label="📥 엑셀 양식 샘플 다운로드",
-        data=buffer.getvalue(),
-        file_name="생기부_입력양식_샘플.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-    st.markdown('</div>', unsafe_allow_html=True)
+        # 샘플 파일 다운로드 구조
+        sample_df = pd.DataFrame({
+            "학번": [10101, 10102],
+            "이름": ["홍길동", "이순신"],
+            "보고서내용": ["자율주행 자동차의 윤리적 딜레마 보고서를 제출함.", "효소 촉매 반응 실험을 주도하고 시각화함."]
+        })
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            sample_df.to_excel(writer, index=False)
+            
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.download_button(
+            label="📥 엑셀 양식 샘플 다운로드",
+            data=buffer.getvalue(),
+            file_name="생기부_입력양식_샘플.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
 with col2:
-    st.markdown('<div class="green-card"><div class="card-title">🐰 2. 가이드라인 규칙</div>', unsafe_allow_html=True)
-    st.markdown("""
-        <div class="rule-item"><b>🐰 문체 제안:</b> 모든 문장의 반드시 명사형 종결 어미(~함., ~임.)로 종결</div>
-        <div class="rule-item"><b>🐰 실명 배제:</b> 문장 내부에서 학생의 실명을 절대 언급하지 않음</div>
-        <div class="rule-item"><b>🐰 컴플라이언스:</b> 사교육 유발 요소, 교외 수상, 부모 직업, 대학명 차단</div>
-        <div class="rule-item"><b>🐰 문항 극대화:</b> 설정된 바이트 제한 한도 내에서 최대한 조밀하고 풍부하게 서술</div>
-    """, unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+    # 테두리 컨테이너 내부로 가이드라인 컴포넌트 격리
+    with st.container(border=True):
+        st.markdown('<div class="card-title">🐰 2. 가이드라인 규칙</div>', unsafe_allow_html=True)
+        st.markdown("""
+            <div class="rule-item"><b>🐰 문체 제한:</b> 모든 문장의 반드시 명사형 종결 어미(~함., ~임.)로 종결</div>
+            <div class="rule-item"><b>🐰 실명 배제:</b> 문장 내부에서 학생의 실명을 절대 언급하지 않음</div>
+            <div class="rule-item"><b>🐰 컴플라이언스:</b> 사교육 유발 요소, 교외 수상, 부모 직업, 대학명 차단</div>
+            <div class="rule-item"><b>🐰 문항 극대화:</b> 설정된 바이트 제한 한도 내에서 최대한 조밀하고 풍부하게 서술</div>
+        """, unsafe_allow_html=True)
 
 # 📊 하단 와이드 미리보기 및 로직 구동 영역
 if uploaded_file:
@@ -183,11 +167,13 @@ if uploaded_file:
         if not all(col in df.columns for col in required_columns):
             st.error(f"⚠️ 엑셀 파일에 필수 컬럼({required_columns})이 부족합니다.")
         else:
-            st.markdown('<div class="green-card-wide"><div class="card-title">📊 업로드된 학생 데이터 미리보기</div>', unsafe_allow_html=True)
-            st.dataframe(df, use_container_width=True)
-            st.markdown('</div>', unsafe_allow_html=True)
+            st.markdown("<br>", unsafe_allow_html=True)
+            with st.container(border=True):
+                st.markdown('<div class="card-title">📊 업로드된 학생 데이터 미리보기</div>', unsafe_allow_html=True)
+                st.dataframe(df, use_container_width=True)
             
             # 레이아웃을 이용한 하단 정중앙 버튼 배치
+            st.markdown("<br>", unsafe_allow_html=True)
             c_col1, c_col2, c_col3 = st.columns([1, 2, 1])
             with c_col2:
                 start_button = st.button("⚙️ 생기부 초안 일괄 생성 시작", use_container_width=True)
@@ -265,20 +251,21 @@ if uploaded_file:
                     df["생기부_초안"] = draft_list
                     df["사용_바이트"] = byte_list
                     
-                    st.markdown('<div class="green-card-wide"><div class="card-title">✨ 자동 생성 결과 (미리보기)</div>', unsafe_allow_html=True)
-                    st.dataframe(df[["학번", "이름", "생기부_초안", "사용_바이트"]], use_container_width=True)
-                    
-                    out_buffer = io.BytesIO()
-                    with pd.ExcelWriter(out_buffer, engine='openpyxl') as writer:
-                        df.to_excel(writer, index=False, sheet_name='생기부_결과')
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    with st.container(border=True):
+                        st.markdown('<div class="card-title">✨ 자동 생성 결과 (미리보기)</div>', unsafe_allow_html=True)
+                        st.dataframe(df[["학번", "이름", "생기부_초안", "사용_바이트"]], use_container_width=True)
                         
-                    st.download_button(
-                        label="📥 변환된 최종 엑셀 파일 다운로드",
-                        data=out_buffer.getvalue(),
-                        file_name="생기부_그린버전_완료.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
-                    st.markdown('</div>', unsafe_allow_html=True)
+                        out_buffer = io.BytesIO()
+                        with pd.ExcelWriter(out_buffer, engine='openpyxl') as writer:
+                            df.to_excel(writer, index=False, sheet_name='생기부_결과')
+                            
+                        st.download_button(
+                            label="📥 변환된 최종 엑셀 파일 다운로드",
+                            data=out_buffer.getvalue(),
+                            file_name="생기부_그린버전_완료.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
                     
     except Exception as e:
         st.error(f"파일 에러: {e}")
