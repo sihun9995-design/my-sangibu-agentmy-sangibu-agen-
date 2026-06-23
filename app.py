@@ -3,7 +3,7 @@ import pandas as pd
 from openai import OpenAI
 import io
 
-# 나이스 기준 바이트 계산 함수 (UTF-8 기준: 한글 3바이트, 영문/숫자/공백 1바이트)
+# 나이스 기준 바이트 계산 함수
 def calculate_bytes(text):
     if not text:
         return 0
@@ -11,58 +11,151 @@ def calculate_bytes(text):
 
 # 페이지 설정
 st.set_page_config(
-    page_title="생기부 자동화 에이전트 (ChatGPT)",
+    page_title="생기부 일괄 작성 에이전트",
     page_icon="📝",
     layout="wide"
 )
 
-# 디자인 개선을 위한 커스텀 CSS
+# 🎨 이미지의 그린/토끼 컨셉을 반영한 커스텀 CSS
 st.markdown("""
     <style>
-    .main-header { font-size: 2.4rem; font-weight: 800; color: #1E3A8A; margin-bottom: 0.2rem; }
-    .sub-header { font-size: 1.1rem; color: #4B5563; margin-bottom: 2rem; }
-    .card { background-color: #F8FAFC; padding: 1.5rem; border-radius: 0.5rem; border: 1px solid #E2E8F0; margin-bottom: 1.5rem; }
-    .stButton>button { background-color: #1E3A8A; color: white; font-weight: 600; border-radius: 0.375rem; padding: 0.5rem 2rem; }
-    .stButton>button:hover { background-color: #1D4ED8; color: white; }
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap');
+    
+    html, body, [data-testid="stAppViewContainer"] {
+        font-family: 'Noto Sans KR', sans-serif;
+        background-color: #F4F9F4;
+    }
+    
+    /* 사이드바 그린 테마 */
+    [data-testid="stSidebar"] {
+        background-color: #E8F5E9 !important;
+        border-right: 1px solid #C8E6C9;
+    }
+    
+    /* 메인 헤더 영역 */
+    .main-title-container {
+        text-align: center;
+        padding: 1.5rem 0;
+        margin-bottom: 1.5rem;
+    }
+    .main-title {
+        font-size: 2.3rem;
+        font-weight: 800;
+        color: #2E7D32;
+        margin-bottom: 0.4rem;
+    }
+    .main-subtitle {
+        font-size: 1.05rem;
+        color: #558B2F;
+        font-weight: 500;
+    }
+    
+    /* 화이트 카드 컴포넌트 */
+    .green-card {
+        background: white;
+        padding: 1.5rem;
+        border-radius: 12px;
+        border: 1px solid #C8E6C9;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+        margin-bottom: 1rem;
+        min-height: 280px;
+    }
+    
+    .green-card-wide {
+        background: white;
+        padding: 1.5rem;
+        border-radius: 12px;
+        border: 1px solid #C8E6C9;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+        margin-bottom: 1.5rem;
+    }
+    
+    .card-title {
+        font-size: 1.3rem;
+        font-weight: 700;
+        color: #1B5E20;
+        margin-bottom: 1rem;
+        border-bottom: 2px solid #A5D6A7;
+        padding-bottom: 0.5rem;
+    }
+    
+    /* 가이드라인 리스트 아이템 스타일 */
+    .rule-item {
+        background-color: #F9FBF9;
+        padding: 0.6rem 0.8rem;
+        border-radius: 8px;
+        border: 1px solid #E8F5E9;
+        margin-bottom: 0.5rem;
+        font-size: 0.95rem;
+        color: #374151;
+    }
+    
+    /* 하단 중앙 정렬 대형 버튼 스타일 */
+    .center-btn-container {
+        display: flex;
+        justify-content: center;
+        margin-top: 1.5rem;
+        margin-bottom: 2rem;
+    }
+    
+    .stButton>button {
+        background: linear-gradient(135deg, #2E7D32 0%, #1B5E20 100%) !important;
+        color: white !important;
+        font-weight: 700 !important;
+        font-size: 1.15rem !important;
+        border-radius: 30px !important;
+        padding: 0.75rem 3.5rem !important;
+        border: none !important;
+        box-shadow: 0 4px 10px rgba(27, 94, 32, 0.3) !important;
+        transition: all 0.2s ease-in-out !important;
+    }
+    .stButton>button:hover {
+        transform: translateY(-2px) !important;
+        box-shadow: 0 6px 15px rgba(27, 94, 32, 0.4) !important;
+    }
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="main-header">📝 생기부 일괄 작성 및 자동 분류 에이전트</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-header">선생님의 야근을 줄여드리기 위해 엑셀 파일을 업로드하면 OpenAI GPT-4o 엔진이 나이스(NEIS) 기준에 맞춰 초안을 생성합니다.</div>', unsafe_allow_html=True)
+# 🎇 중앙 타이틀 배너
+st.markdown("""
+    <div class="main-title-container">
+        <div class="main-title">📑 생기부 일괄 작성 및 자동 분류 에이전트</div>
+        <div class="main-subtitle">선생님의 야근을 덜어드리기 위해 엑셀 파일을 업로드하면 OpenAI GPT-4o 엔진이 가이드라인에 맞춘 초안을 생성합니다.</div>
+    </div>
+""", unsafe_allow_html=True)
 
-# 사이드바 설정
+# ⚙️ 사이드바 영역
 with st.sidebar:
-    st.header("⚙️ 시스템 설정 및 인증")
+    st.markdown("### 🐰 시스템 설정 및 인증")
     st.markdown("---")
-    openai_api_key = st.text_input("OpenAI API Key 입력", type="password", help="발급받으신 sk-... 형태의 키를 입력하세요.")
+    openai_api_key = st.text_input("OpenAI API Key 입력", type="password", placeholder="sk-proj-...")
     
     st.markdown("### 📊 글자 수 설정")
     max_bytes = st.slider(
-        "최대 허용 바이트 (나이스 한도: 1500바이트)",
-        min_value=1000, max_value=1450, value=1350, step=50,
-        help="안정적인 기입을 위해 1,350바이트(공백 포함 한글 약 450자) 내외를 권장합니다."
+        "최대 허용 바이트 (나이스 한도: 1500)",
+        min_value=1000, max_value=1450, value=1350, step=50
     )
+    st.markdown("---")
+    st.caption("🔒 본 시스템은 입력된 데이터를 수집하지 않는 안전한 휘발성 에이전트입니다.")
 
-# 메인 기능 영역
+# 🧩 메인 레이아웃 (상단 2분할 구조)
 col1, col2 = st.columns([1, 1])
 
 with col1:
-    st.markdown('<div class="card"><h3>1. 데이터 업로드</h3>', unsafe_allow_html=True)
-    uploaded_file = st.file_uploader("학생 데이터 엑셀 파일 (.xlsx)을 선택하세요", type=["xlsx"])
+    st.markdown('<div class="green-card"><div class="card-title">🐰 1. 데이터 업로드</div>', unsafe_allow_html=True)
+    uploaded_file = st.file_uploader("학생 데이터 엑셀 파일(.xlsx)을 선택하세요", type=["xlsx"])
     
-    # 예시 샘플 데이터 제공
+    # 샘플 파일 다운로드
     sample_df = pd.DataFrame({
         "학번": [10101, 10102],
         "이름": ["홍길동", "이순신"],
-        "보고서내용": [
-            "자율주행 자동차의 윤리적 딜레마에 대해 탐구하고 보고서를 제출함. 센서 인지 오류 가능성을 분석함.",
-            "효소의 활성화 에너지와 온도 간의 관계를 측정하는 실험을 주도하고 그래프로 시각화하여 설명함."
-        ]
+        "보고서내용": ["자율주행 자동차의 윤리적 딜레마 보고서를 제출함.", "효소 촉매 반응 실험을 주도하고 시각화함."]
     })
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
         sample_df.to_excel(writer, index=False)
-    
+        
+    st.markdown("<br>", unsafe_allow_html=True)
     st.download_button(
         label="📥 엑셀 양식 샘플 다운로드",
         data=buffer.getvalue(),
@@ -72,15 +165,16 @@ with col1:
     st.markdown('</div>', unsafe_allow_html=True)
 
 with col2:
-    st.markdown('<div class="card"><h3>2. 가이드라인 규칙</h3>', unsafe_allow_html=True)
+    st.markdown('<div class="green-card"><div class="card-title">🐰 2. 가이드라인 규칙</div>', unsafe_allow_html=True)
     st.markdown("""
-    * **문체 제한:** 모든 문장을 반드시 `~함.`, `~임.` 형태로 종결
-    * **실명 배제:** 문장 내부에서 학생의 실명을 절대 언급하지 않음
-    * **컴플라이언스:** 사교육 유발 요소, 교외 수상, 부모 직업, 구체적 대학명 자동 차단
-    * **분량 극대화:** 설정한 목표 바이트 수에 최대한 꽉 차게 풍부한 내용 서술
-    """)
+        <div class="rule-item"><b>🐰 문체 제안:</b> 모든 문장의 반드시 명사형 종결 어미(~함., ~임.)로 종결</div>
+        <div class="rule-item"><b>🐰 실명 배제:</b> 문장 내부에서 학생의 실명을 절대 언급하지 않음</div>
+        <div class="rule-item"><b>🐰 컴플라이언스:</b> 사교육 유발 요소, 교외 수상, 부모 직업, 대학명 차단</div>
+        <div class="rule-item"><b>🐰 문항 극대화:</b> 설정된 바이트 제한 한도 내에서 최대한 조밀하고 풍부하게 서술</div>
+    """, unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
+# 📊 하단 와이드 미리보기 및 로직 구동 영역
 if uploaded_file:
     try:
         df = pd.read_excel(uploaded_file)
@@ -89,10 +183,16 @@ if uploaded_file:
         if not all(col in df.columns for col in required_columns):
             st.error(f"⚠️ 엑셀 파일에 필수 컬럼({required_columns})이 부족합니다.")
         else:
-            st.markdown("### 📋 업로드된 학생 데이터 미리보기")
-            st.dataframe(df.head(), use_container_width=True)
+            st.markdown('<div class="green-card-wide"><div class="card-title">📊 업로드된 학생 데이터 미리보기</div>', unsafe_allow_html=True)
+            st.dataframe(df, use_container_width=True)
+            st.markdown('</div>', unsafe_allow_html=True)
             
-            if st.button("🚀 생기부 초안 일괄 생성 시작"):
+            # 레이아웃을 이용한 하단 정중앙 버튼 배치
+            c_col1, c_col2, c_col3 = st.columns([1, 2, 1])
+            with c_col2:
+                start_button = st.button("⚙️ 생기부 초안 일괄 생성 시작", use_container_width=True)
+                
+            if start_button:
                 if not openai_api_key:
                     st.warning("🔑 왼쪽 사이드바에 OpenAI API Key를 먼저 입력해주세요.")
                 else:
@@ -109,7 +209,7 @@ if uploaded_file:
                         student_name = row["이름"]
                         raw_content = row["보고서내용"]
                         
-                        status_message.info(f"⏳ [{idx+1}/{total_rows}] {student_name} 학생의 생기부 문장 생성 중...")
+                        status_message.info(f"⏳ [{idx+1}/{total_rows}] {student_name} 학생 생기부 생성 중...")
                         
                         system_prompt = f"""
                         당신은 대한민국 고등학교의 대학입시 및 학생부종합전형을 완벽하게 숙지하고 있는 베테랑 교사입니다.
@@ -117,7 +217,7 @@ if uploaded_file:
 
                         [엄격 준수 규칙]
                         1. 문체: 모든 문장은 예외 없이 반드시 명사형 종결 어미인 '~함.', '~임.'으로 끝내야 합니다. (~했음, ~하였음 등은 금지하며 오직 ~함., ~임. 구조만 허용)
-                        2. 실명 언급 금지: 생성되는 텍스트 내부에서 학생의 이름(예: '{student_name}', '{student_name} 학생은')을 절대로 언급하지 마십시오. 나이스 시스템 특성상 주어 없이 바로 구체적인 탐구 내용이나 동기부터 서술을 시작해야 합니다. 주어가 필요한 경우 '위 학생은', '본인은' 등으로 대체하거나 아예 생략하십시오.
+                        2. 실명 언급 금지: 생성되는 텍스트 내부에서 학생의 이름(예: '{student_name}', '{student_name} 학생은')을 절대로 언급하지 마십시오. 주어가 필요한 경우 '위 학생은', '본인은' 등으로 대체하거나 아예 생략하십시오.
                         3. 분량 및 바이트 극대화: 서술 내용을 축약하지 말고, 설정된 최대 제한 분량인 {max_bytes}바이트에 최대한 가깝도록(최소 {max_bytes - 150}바이트 이상, 목표치의 90% 이상 수준) 탐구 과정과 학업적 성장을 매우 구체적이고 풍부하게 풀어써서 분량을 꽉 채우십시오.
                         4. 컴플라이언스: 사교육 유발 요소(소논문, 교외 수상 기록, 공인어학시험, 사설 학원 연계 활동), 부모의 사회경제적 지위 암시 단어, 구체적인 대학명 및 교육청 외의 기관명은 철저히 배제하고 삭제하십시오.
                         5. 서술 구조: 주제 선정 동기 -> 구체적인 탐구 과정 및 논리적 전개 -> 배우고 느낀 점 및 학생의 인지적 성장이 유기적이고 밀도 있게 연결되도록 작성하십시오.
@@ -126,7 +226,6 @@ if uploaded_file:
                         user_prompt = f"제출된 보고서 및 관찰 메모 내용:\n{raw_content}"
                         
                         try:
-                            # 1차 문장 생성
                             response = client.chat.completions.create(
                                 model="gpt-4o",
                                 messages=[
@@ -138,14 +237,13 @@ if uploaded_file:
                             draft_text = response.choices[0].message.content.strip()
                             current_bytes = calculate_bytes(draft_text)
                             
-                            # 바이트 제한 초과 시에만 조밀하게 압축 재시도 Loop
                             retry_count = 0
                             while current_bytes > max_bytes and retry_count < 2:
                                 response_retry = client.chat.completions.create(
                                     model="gpt-4o",
                                     messages=[
                                         {"role": "system", "content": system_prompt},
-                                        {"role": "user", "content": f"앞서 작성된 내용이 {max_bytes}바이트를 초과했습니다. 핵심 맥락과 풍부함은 유지하되 문장 구조를 조금 더 조밀하게 압축해서 다시 써주세요.\n\n이전 내용:\n{draft_text}"}
+                                        {"role": "user", "content": f"앞서 작성된 내용이 {max_bytes}바이트를 초과했습니다. 문맥을 조밀하게 압축해서 다시 써주세요.\n\n이전 내용:\n{draft_text}"}
                                     ],
                                     temperature=0.4
                                 )
@@ -167,7 +265,7 @@ if uploaded_file:
                     df["생기부_초안"] = draft_list
                     df["사용_바이트"] = byte_list
                     
-                    st.markdown("### ✨ 자동 생성 결과 (미리보기)")
+                    st.markdown('<div class="green-card-wide"><div class="card-title">✨ 자동 생성 결과 (미리보기)</div>', unsafe_allow_html=True)
                     st.dataframe(df[["학번", "이름", "생기부_초안", "사용_바이트"]], use_container_width=True)
                     
                     out_buffer = io.BytesIO()
@@ -177,9 +275,10 @@ if uploaded_file:
                     st.download_button(
                         label="📥 변환된 최종 엑셀 파일 다운로드",
                         data=out_buffer.getvalue(),
-                        file_name="생기부_ChatGPT_변환완료.xlsx",
+                        file_name="생기부_그린버전_완료.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
+                    st.markdown('</div>', unsafe_allow_html=True)
                     
     except Exception as e:
         st.error(f"파일 에러: {e}")
