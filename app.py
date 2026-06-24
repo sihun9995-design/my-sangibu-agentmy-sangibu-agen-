@@ -217,13 +217,13 @@ with st.sidebar:
     st.markdown("### 🤖 AI 모델 선택")
     model_choice = st.selectbox(
         "엔진 모델 지정",
-        ["🔥 GPT-4o (마스터 고품질 모드)", "⚡ GPT-4o-mini (초가성비 고속 모드)"],
+        ["🔥 GPT-4o ", "⚡ GPT-4o-mini "],
         index=0
     )
     model_name = "gpt-4o-mini" if "mini" in model_choice.lower() else "gpt-4o"
     
     st.markdown("---")
-    st.markdown("### 👥 담당 관리")
+    st.markdown("### 👥 맞춤 생기부 계열")
     subject_preset = st.selectbox("활동 분석 계열 설정", ["자연과학 계열", "공학 계열", "인문/사회 계열", "진로 탐색 활동"])
     st.session_state.selected_preset = subject_preset
     
