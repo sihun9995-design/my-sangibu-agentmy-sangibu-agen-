@@ -217,7 +217,7 @@ if uploaded_file:
         
         st.markdown("<br>", unsafe_allow_html=True)
         c_col1, c_col2, c_col3 = st.columns([1, 2, 1])
-        with c_col2: start_button = st.button("⚙️ 생기부 초안 일괄 생성 시작 (SaaS형 하이브리드 병렬 최적화)", use_container_width=True)
+        with c_col2: start_button = st.button("⚙️ 생기부 초안 일괄 생성 시작 ", use_container_width=True)
             
         selected_guideline = preset_guidelines[subject_preset]
         master_system_prompt = f"""
