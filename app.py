@@ -22,17 +22,17 @@ def get_status_string(current_bytes, max_bytes):
     else:
         return f"⚠️ 부족 ({current_bytes}B)"
 
-# [최적화 마스터 V3] ALL gpt-4o 고정 + Prompt Caching 적중 + max_tokens 방어벽
-def generate_student_draft(client, system_prompt, student_name, raw_content, max_bytes, encoding_type, feedback_msg=None):
+# [최적화 마스터 V4] 선택한 모델 동적 반영 + Prompt Caching 적중 + max_tokens 방어벽
+def generate_student_draft(client, system_prompt, student_name, raw_content, max_bytes, encoding_type, model_name, feedback_msg=None):
     try:
         if feedback_msg:
             user_prompt = f"대상 학생 이름: {student_name}\n원본 관찰 기록 및 소감 내용:\n{raw_content}\n\n[선생님의 추가 수정 피드백]:\n{feedback_msg}\n\n[필수]: 위 피드백을 반영하되, 학생 실명은 세특 본문에 절대 언급하지 말고 명사형 종결 어미로 작성하세요."
         else:
             user_prompt = f"대상 학생 이름: {student_name}\n제출된 보고서 및 관찰 메모 내용:\n{raw_content}\n\n[필수]: 위 학생의 이름을 세특 본문에 절대 언급하지 말고, 주어를 생략하여 작성하세요."
 
-        # 1차 초안 생성 (gpt-4o 고정)
+        # 1차 초안 생성 (선택한 모델 적용)
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model=model_name,
             messages=[
                 {"role": "system", "content": system_prompt}, 
                 {"role": "user", "content": user_prompt}
@@ -43,7 +43,7 @@ def generate_student_draft(client, system_prompt, student_name, raw_content, max
         draft_text = response.choices[0].message.content.strip()
         current_bytes = calculate_bytes(draft_text, encoding_type)
         
-        # 💡 [Prompt Caching 최적화] 시스템 프롬프트(Prefix)를 그대로 유지하여 캐싱 할인을 유지하며 gpt-4o로 정교한 압축 수행
+        # 💡 [Prompt Caching 최적화] 동일한 시스템 지침과 모델을 유지하여 캐싱 효율 극대화하며 압축 수행
         retry_count = 0
         while current_bytes > max_bytes and retry_count < 2:
             retry_user_prompt = f"""
@@ -55,9 +55,9 @@ def generate_student_draft(client, system_prompt, student_name, raw_content, max
             """
             
             response_retry = client.chat.completions.create(
-                model="gpt-4o", # 💡 gpt-4o로 품질 일관성 유지
+                model=model_name,
                 messages=[
-                    {"role": "system", "content": system_prompt}, # 💡 동일한 시스템 지침으로 Cache Miss 차단
+                    {"role": "system", "content": system_prompt}, 
                     {"role": "user", "content": retry_user_prompt}
                 ],
                 temperature=0.4,
@@ -87,7 +87,7 @@ if "selected_preset" not in st.session_state:
 # UI 커스텀 CSS (기존 스타일 아이덴티티 유지)
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght=400;500;700;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap');
     html, body, [data-testid="stAppViewContainer"] {
         font-family: 'Noto Sans KR', sans-serif;
         background-color: #F4F9F4;
@@ -131,6 +131,16 @@ with st.sidebar:
     st.markdown("### 🐰 시스템 설정 및 인증")
     st.markdown("---")
     openai_api_key = st.text_input("OpenAI API Key 입력", type="password", placeholder="sk-proj-...")
+    
+    st.markdown("---")
+    st.markdown("### 🤖 AI 엔진 모델 선택")
+    # 🔍 [추가된 모델 선택 컴포넌트]
+    model_choice = st.selectbox(
+        "사용할 AI 모델 선택",
+        ["🔥 GPT-4o (마스터 고품질 모드)", "⚡ GPT-4o-mini (초가성비 고속 모드)"],
+        index=0
+    )
+    model_name = "gpt-4o" if "GPT-4o" in model_choice else "gpt-4o-mini"
     
     st.markdown("---")
     st.markdown("### 📚 담당 계열 설정")
@@ -182,11 +192,11 @@ with col2:
     with st.container(border=True):
         st.markdown('<div class="card-title">🐰 2. 가이드라인 규칙</div>', unsafe_allow_html=True)
         st.markdown(f"""
+            <div class="rule-item"><b>🤖 현재 엔진:</b> <span style='color:#1B5E20; font-weight:bold;'>{model_name.upper()}</span></div>
             <div class="rule-item"><b>🎯 선택된 프리셋:</b> <span style='color:#2E7D32; font-weight:bold;'>{subject_preset}</span></div>
             <div class="rule-item"><b>🐰 문체 제한:</b> 모든 문장의 반드시 명사형 종결 어미(~함., ~임.)로 종결</div>
             <div class="rule-item"><b>🐰 실명 배제:</b> 문장 내부에서 학생의 실명을 절대 언급하지 않음</div>
             <div class="rule-item"><b>🐰 컴플라이언스:</b> 사교육 유발 요소, 교외 수상, 부모 직업, 대학명 차단</div>
-            <div class="rule-item"><b>🐰 문항 극대화:</b> 설정된 바이트 제한 한도 내에서 최대한 풍부하게 서술</div>
         """, unsafe_allow_html=True)
 
 if uploaded_file:
@@ -236,7 +246,6 @@ if uploaded_file:
 
         [올바른 기재 예시 참고 (Few-shot)]
         - 예시 1: 자율주행 자동차의 윤리적 딜레마를 주제로 트롤리 딜레마 상황에서 알고리즘의 판단 기준을 비판적으로 분석한 보고서를 제출함. 센서 데이터 인식 오류 가능성을 확률적으로 접근하여 제어 공학적 대안을 제시하는 등 학술적 깊이가 돋보임. 탐구 과정에서 기술의 사회적 책임감을 깨닫고 향후 공학도로서의 윤리적 가치관을 정립하는 계기가 됨.
-        - 예시 2: 현대 사회의 양극화 현상에 관한 문헌을 조사하고 소득 격차가 교육 기회의 불평등으로 이어지는 메커니즘을 사회학적 관점에서 고찰함. 통계 자료를 바탕으로 복지 정책의 실효성을 다각도로 분석하여 논리적 에세이를 전개함. 사회 문제에 대한 깊은 통찰력과 비판적 사고력이 매우 우수함.
         """
 
         if start_button:
@@ -251,7 +260,7 @@ if uploaded_file:
                 
                 progress_bar = st.progress(0)
                 status_message = st.empty()
-                status_message.info(f"⏳ 총 {total_rows}명의 세특 초안을 고속 인프라(gpt-4o)로 생성 중입니다...")
+                status_message.info(f"⏳ 총 {total_rows}명의 세특 초안을 {model_name.upper()} 엔진으로 동적 파이프라인 생성 중...")
 
                 with ThreadPoolExecutor(max_workers=5) as executor:
                     future_to_idx = {}
@@ -259,9 +268,10 @@ if uploaded_file:
                         student_name = str(row[name_col])
                         raw_content = str(row[content_col])
                         
+                        # 인자에 동적으로 선택된 model_name 추가 주입
                         future = executor.submit(
                             generate_student_draft, 
-                            client, master_system_prompt, student_name, raw_content, max_bytes, encoding_type
+                            client, master_system_prompt, student_name, raw_content, max_bytes, encoding_type, model_name
                         )
                         future_to_idx[future] = idx
 
@@ -275,7 +285,7 @@ if uploaded_file:
                         completed_count += 1
                         progress_bar.progress(completed_count / total_rows)
                 
-                status_message.success("🎉 모든 학생의 캐싱 최적화 세특 초안 생성이 완료되었습니다!")
+                status_message.success(f"🎉 모든 학생의 세특 초안 생성이 완료되었습니다! (엔진: {model_name.upper()})")
                 
                 working_df = df_origin[[id_col, name_col, content_col]].copy()
                 working_df["생기부_초안"] = draft_list
@@ -303,7 +313,7 @@ if uploaded_file:
             # 2. 개별 학생 핀포인트 피드백 재작성 컨트롤러
             with st.container(border=True):
                 st.markdown('<div class="card-title">🔄 핀포인트 개별 학생 맞춤형 재요청 비서</div>', unsafe_allow_html=True)
-                st.write("문장 퀄리티가 아쉬운 특정 학생이 있다면 추가 지시를 통해 한 명만 다시 만들 수 있습니다. (기존 다른 학생의 수동 수정본은 안전하게 보존되며 캐싱 혜택을 받습니다)")
+                st.write("문장 퀄리티가 아쉬운 특정 학생이 있다면 추가 지시를 통해 한 명만 다시 만들 수 있습니다. (현재 지정된 모델로 단일 빌드됩니다)")
                 
                 student_options = st.session_state.generated_df[name_col].tolist()
                 tgt_col1, tgt_col2 = st.columns([1, 2])
@@ -317,13 +327,14 @@ if uploaded_file:
                         st.warning("💡 AI에게 전달할 수정 지시사항(피드백)을 입력해주세요.")
                     else:
                         client = OpenAI(api_key=openai_api_key)
-                        with st.spinner(f"⏳ {target_student} 학생의 세특 초안을 최적화 필터로 보완 재구성하는 중..."):
+                        with st.spinner(f"⏳ {target_student} 학생의 세특 초안을 {model_name.upper()} 엔진으로 보완 재구성하는 중..."):
                             
                             target_row = st.session_state.generated_df[st.session_state.generated_df[name_col] == target_student].iloc[0]
                             target_idx = st.session_state.generated_df[st.session_state.generated_df[name_col] == target_student].index[0]
                             
+                            # 핀포인트 단일 갱신도 현재 선택된 모델명 변수(model_name)를 동적 매핑
                             new_text, new_status = generate_student_draft(
-                                client, master_system_prompt, target_student, target_row[content_col], max_bytes, encoding_type, feedback_msg=feedback_msg
+                                client, master_system_prompt, target_student, target_row[content_col], max_bytes, encoding_type, model_name, feedback_msg=feedback_msg
                             )
                             st.session_state.generated_df.at[target_idx, "생기부_초안"] = new_text
                             st.session_state.generated_df.at[target_idx, "상태_확인"] = new_status
@@ -340,7 +351,7 @@ if uploaded_file:
             st.download_button(
                 label="📥 최종 화면 교정본 반영 마스터 엑셀 다운로드",
                 data=out_buffer.getvalue(),
-                file_name="생기부_올인원마스터_최종결과.xlsx",
+                file_name=f"생기부_올인원마스터_{model_name}_최종결과.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
                     
