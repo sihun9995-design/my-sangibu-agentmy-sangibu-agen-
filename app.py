@@ -4,9 +4,9 @@ from openai import OpenAI
 import io
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# ⚙️ [인코딩 최적화] 유연한 바이트 계산 함수 (EUC-KR / UTF-8 선택 가능)
+# ⚙️ [인코딩 최적화] 유연한 바이트 계산 함수
 def calculate_bytes(text, encoding_type):
-    if not text:
+    if not text or pd.isna(text):
         return 0
     try:
         return len(str(text).encode(encoding_type))
@@ -22,15 +22,32 @@ def get_status_string(current_bytes, max_bytes):
     else:
         return f"⚠️ 부족 ({current_bytes}B)"
 
-# [최적화 마스터 V4] 선택한 모델 동적 반영 + Prompt Caching 적중 + max_tokens 방어벽
+# 📊 [성능 최적화] 엑셀 변환 바이너리 캐싱 함수 (UI 끊김 현상 방지)
+@st.cache_data
+def convert_df_to_excel(df):
+    out_buffer = io.BytesIO()
+    with pd.ExcelWriter(out_buffer, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='생기부_최종본')
+    return out_buffer.getvalue()
+
+# 🤖 [토큰 최적화 마스터 V5] 동적 max_tokens 가이드라인 + 프롬프트 캐싱 최적화
 def generate_student_draft(client, system_prompt, student_name, raw_content, max_bytes, encoding_type, model_name, feedback_msg=None):
+    # 전처리: 데이터가 없거나 결측치인 경우 방어
+    if not raw_content or str(raw_content).strip().lower() == 'nan':
+        return "기록된 활동 내용이 없습니다.", "⚠️ 부족 (0B)"
+
     try:
         if feedback_msg:
             user_prompt = f"대상 학생 이름: {student_name}\n원본 관찰 기록 및 소감 내용:\n{raw_content}\n\n[선생님의 추가 수정 피드백]:\n{feedback_msg}\n\n[필수]: 위 피드백을 반영하되, 학생 실명은 세특 본문에 절대 언급하지 말고 명사형 종결 어미로 작성하세요."
         else:
             user_prompt = f"대상 학생 이름: {student_name}\n제출된 보고서 및 관찰 메모 내용:\n{raw_content}\n\n[필수]: 위 학생의 이름을 세특 본문에 절대 언급하지 말고, 주어를 생략하여 작성하세요."
 
-        # 1차 초안 생성 (선택한 모델 적용)
+        # 💡 [토큰 최적화] 목표 바이트 수에 맞춰 첫 API 생성 토큰 한도를 동적으로 계산 (비용 절감)
+        # 한국어 기준 보통 1글자 = UTF-8(3B), EUC-KR(2B). GPT-4o 토크나이저는 대략 1자당 1~1.2 토큰 소모.
+        estimated_chars = max_bytes / (3 if encoding_type == 'utf-8' else 2)
+        dynamic_max_tokens = min(800, int(estimated_chars * 1.4) + 100)
+
+        # 1차 초안 생성
         response = client.chat.completions.create(
             model=model_name,
             messages=[
@@ -38,12 +55,12 @@ def generate_student_draft(client, system_prompt, student_name, raw_content, max
                 {"role": "user", "content": user_prompt}
             ],
             temperature=0.6 if not feedback_msg else 0.5,
-            max_tokens=800 # 비정상적 토큰 폭발 방지 방어벽
+            max_tokens=dynamic_max_tokens
         )
         draft_text = response.choices[0].message.content.strip()
         current_bytes = calculate_bytes(draft_text, encoding_type)
         
-        # 💡 [버그 완벽 수정] retry_count 초기화 구문 재삽입 및 캐싱 유지 압축 로직
+        # 바이트 초과 시 압축 리트라이 루프 (최대 2회)
         retry_count = 0
         while current_bytes > max_bytes and retry_count < 2:
             retry_user_prompt = f"""
@@ -54,14 +71,17 @@ def generate_student_draft(client, system_prompt, student_name, raw_content, max
             {draft_text}
             """
             
+            # 리트라이 시에는 조금 더 타이트하게 토큰 제한
+            retry_max_tokens = min(700, int(estimated_chars * 1.2) + 50)
+
             response_retry = client.chat.completions.create(
                 model=model_name,
                 messages=[
                     {"role": "system", "content": system_prompt}, 
                     {"role": "user", "content": retry_user_prompt}
                 ],
-                temperature=0.4,
-                max_tokens=700
+                temperature=0.3, # 압축의 정밀도를 높이기 위해 온도를 낮춤
+                max_tokens=retry_max_tokens
             )
             draft_text = response_retry.choices[0].message.content.strip()
             current_bytes = calculate_bytes(draft_text, encoding_type)
@@ -84,7 +104,7 @@ if "generated_df" not in st.session_state:
 if "selected_preset" not in st.session_state:
     st.session_state.selected_preset = "자연과학 계열"
 
-# 🎨 [구글/제미나이 매칭 패치] 프리미엄 미니멀리즘 인터페이스 CSS
+# 🎨 프리미엄 미니멀리즘 인터페이스 CSS
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap');
@@ -180,7 +200,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 🎇 구글형 타이틀 배너
+# 타이틀 배너
 st.markdown("""
     <div class="main-title-container">
         <div class="main-title">생기부 작성 도움 및 자동화 플랫폼</div>
@@ -225,7 +245,7 @@ preset_guidelines = {
     "자연과학 계열": "과학적 호기심, 가설 설정 및 탐구 실험 과정, 객관적 데이터 분석 및 논리적 결론 도출 역량을 중심으로 서술하십시오.",
     "공학 계열": "공학적 문제해결력, 기술적 대안 설계 및 프로토타입 구상, 실용적 구현 가능성 및 테크놀로지 접목 능력을 중심으로 서술하십시오.",
     "인문/사회 계열": "사회 현상에 대한 비판적 사고력, 문헌 및 텍스트 분석 능력, 인문학적 통찰과 논리적 에세이 전개 능력을 중심으로 서술하십시오.",
-    "진로 탐색 활동": "학생의 구체적인 진로 희망 및전공 분야와의 유기적 연계성, 자기주도적인 학업 탐색 태도와 향후 발전 가능성을 중심으로 서술하십시오."
+    "진로 탐색 활동": "학생의 구체적인 진로 희망 및 전공 분야와의 유기적 연계성, 자기주도적인 학업 탐색 태도와 향후 발전 가능성을 중심으로 서술하십시오."
 }
 
 # 🧩 메인 레이아웃
@@ -241,12 +261,14 @@ with col1:
             "이름": ["홍길동", "이순신"],
             "보고서내용": ["자율주행 자동차의 윤리적 딜레마 보고서를 제출함.", "효소 촉매 반응 실험을 주도하고 시각화함."]
         })
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+        
+        # 샘플 엑셀 파일 다운로드 부분도 가볍게 처리
+        sample_buffer = io.BytesIO()
+        with pd.ExcelWriter(sample_buffer, engine='openpyxl') as writer:
             sample_df.to_excel(writer, index=False)
             
         st.markdown("<br>", unsafe_allow_html=True)
-        st.download_button(label="📥 엑셀 입력양식 샘플 다운로드", data=buffer.getvalue(), file_name="생기부_입력양식_샘플.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        st.download_button(label="📥 엑셀 입력양식 샘플 다운로드", data=sample_buffer.getvalue(), file_name="생기부_입력양식_샘플.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 with col2:
     with st.container(border=True):
@@ -254,7 +276,7 @@ with col2:
         st.markdown(f"""
             <div class="rule-item"><b>지정 엔지니어링:</b> {model_name.upper()}</div>
             <div class="rule-item"><b>매핑 타겟 그룹:</b> {subject_preset}</div>
-            <div class="rule-item"><b>문체 준수:</b> 전체 명사형 종결 어미(~함., ~임.) 마감 처리 강제</div>
+            <div class="rule-item"><b>문체 준수:</b> 전체 명사형 종결 어미 (~함., ~임.) 마감 처리 강제</div>
             <div class="rule-item"><b>개인정보 배제:</b> 본문 영역 내 학생 실명 완벽 제어 및 삭제</div>
             <div class="rule-item"><b>컴플라이언스 필터:</b> 사교육 유발 단어, 교외 실적, 부모 지위, 대학명 전면 차단</div>
         """, unsafe_allow_html=True)
@@ -316,7 +338,8 @@ if uploaded_file:
                 status_message = st.empty()
                 status_message.info(f"⏳ 총 {total_rows}명의 데이터 세트를 {model_name.upper()} 핵심 코어로 병렬 변환 처리 중...")
 
-                with ThreadPoolExecutor(max_workers=5) as executor:
+                # 💡 [성능 최적화] max_workers 속도를 12로 상향하여 대기시간 단축
+                with ThreadPoolExecutor(max_workers=12) as executor:
                     future_to_idx = {}
                     for idx, row in df_origin.iterrows():
                         student_name = str(row[name_col])
@@ -391,21 +414,20 @@ if uploaded_file:
                             st.session_state.generated_df.at[target_idx, "생기부_초안"] = new_text
                             st.session_state.generated_df.at[target_idx, "상태_확인"] = new_status
                             
+                            # 💡 세특 데이터가 갱신되었으므로 캐시를 지우기 위해 session_state 재할당 후 리런
                             st.success(f"🎉 {target_student} 학생의 결과물이 최적화 필터링되어 보완 완료되었습니다.")
                             st.rerun()
 
-            # 마스터 엑셀 다운로드 빌드
-            out_buffer = io.BytesIO()
-            with pd.ExcelWriter(out_buffer, engine='openpyxl') as writer:
-                st.session_state.generated_df.to_excel(writer, index=False, sheet_name='생기부_최종본')
-                
+            # 💡 [성능 최적화] 무거운 엑셀 빌드 로직을 캐싱 함수로 교체하여 불필요한 재연산 제거
+            excel_data = convert_df_to_excel(st.session_state.generated_df)
+            
             st.markdown("<br>", unsafe_allow_html=True)
             st.download_button(
                 label="📥 최종 화면 교정본 반영 마스터 엑셀 다운로드",
-                data=out_buffer.getvalue(),
+                data=excel_data,
                 file_name=f"생기부_작성안_{model_name}_최종결과.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-                    
+                            
     except Exception as e:
         st.error(f"파일 처리 중 오류 발생: {e}")
