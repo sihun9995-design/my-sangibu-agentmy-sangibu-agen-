@@ -4,11 +4,14 @@ from openai import OpenAI
 import io
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# 나이스 기준 바이트 계산 함수
-def calculate_bytes(text):
+# ⚙️ [피드백 3 반영] 유연한 바이트 계산 함수 (EUC-KR / UTF-8 선택 가능)
+def calculate_bytes(text, encoding_type):
     if not text:
         return 0
-    return len(str(text).encode('utf-8'))
+    try:
+        return len(str(text).encode(encoding_type))
+    except Exception:
+        return len(str(text).encode('utf-8')) # 폴백
 
 # 바이트 수에 따른 신호등 문자열 반환 함수
 def get_status_string(current_bytes, max_bytes):
@@ -19,39 +22,49 @@ def get_status_string(current_bytes, max_bytes):
     else:
         return f"⚠️ 부족 ({current_bytes}B)"
 
-# [최적화 마스터] 단일 학생 생기부 생성 및 압축 함수 (Prompt Caching & Lightweight Retry 지원)
-def generate_student_draft(client, system_prompt, student_name, raw_content, max_bytes, feedback_msg=None):
+# [최적화 마스터 V2] Prompt Caching 유지 + max_tokens + 모델 이원화 전략 적용
+def generate_student_draft(client, system_prompt, student_name, raw_content, max_bytes, encoding_type, feedback_msg=None):
     try:
-        # 프롬프트 캐싱을 위해 시스템 지침은 고정하고, 가변 데이터(이름, 피드백)는 유저 메시지로 일임
         if feedback_msg:
             user_prompt = f"대상 학생 이름: {student_name}\n원본 관찰 기록 및 소감 내용:\n{raw_content}\n\n[선생님의 추가 수정 피드백]:\n{feedback_msg}\n\n[필수]: 위 피드백을 반영하되, 학생 실명은 세특 본문에 절대 언급하지 말고 명사형 종결 어미로 작성하세요."
         else:
             user_prompt = f"대상 학생 이름: {student_name}\n제출된 보고서 및 관찰 메모 내용:\n{raw_content}\n\n[필수]: 위 학생의 이름을 세특 본문에 절대 언급하지 말고, 주어를 생략하여 작성하세요."
 
+        # 1차 생성: 문맥 이해도가 높은 고성능 gpt-4o 모델 활용
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=[
                 {"role": "system", "content": system_prompt}, 
                 {"role": "user", "content": user_prompt}
             ],
-            temperature=0.6 if not feedback_msg else 0.5
+            temperature=0.6 if not feedback_msg else 0.5,
+            max_tokens=800 # 💡 [피드백 2 반영] 무한 생성 방지 물리 장벽
         )
         draft_text = response.choices[0].message.content.strip()
-        current_bytes = calculate_bytes(draft_text)
+        current_bytes = calculate_bytes(draft_text, encoding_type)
         
-        # [토큰 최적화] 바이트 초과 시, 무거운 시스템 지침을 배제하고 극도로 가벼운 요약 전용 컨텍스트로 재시도
+        # 💡 [피드백 1 & 4 반영] 시스템 프롬프트(Prefix)를 유지하여 캐싱 할인을 받고, 비용 효율적인 gpt-4o-mini로 압축 수행
         retry_count = 0
         while current_bytes > max_bytes and retry_count < 2:
+            retry_user_prompt = f"""
+            앞서 생성된 텍스트가 현재 목표치인 {max_bytes}바이트를 초과하여 {current_bytes}바이트로 계산되었습니다.
+            지정된 모든 세특 작성 원칙(명사형 종결, 실명 배제, 컴플라이언스)을 철저히 유지하면서, 핵심 맥락과 전문 용어 손실 없이 내용을 조밀하게 축약하여 반드시 {max_bytes}바이트 이하로 재작성하십시오.
+            
+            [초과된 이전 텍스트]:
+            {draft_text}
+            """
+            
             response_retry = client.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-4o-mini", # 💡 모델 이원화를 통한 비용 절감
                 messages=[
-                    {"role": "system", "content": "당신은 세특 문장 압축 전문가입니다. 원문의 학술적 깊이와 명사형 종결 어미(~함., ~임.)를 철저히 유지하면서 문장을 정교하게 축약합니다."}, 
-                    {"role": "user", "content": f"다음 세특 초안이 목표치인 {max_bytes}바이트를 초과했습니다({current_bytes}바이트). 핵심 탐구 맥락과 전문 용어는 그대로 보존하되, 문장 구조를 훨씬 촘촘하게 압축하여 반드시 {max_bytes}바이트 이하로 다시 써주세요.\n\n초과된 이전 내용:\n{draft_text}"}
+                    {"role": "system", "content": system_prompt}, # 💡 시스템 프롬프트 일치로 Prompt Caching 적중 유도
+                    {"role": "user", "content": retry_user_prompt}
                 ],
-                temperature=0.4
+                temperature=0.3,
+                max_tokens=600
             )
             draft_text = response_retry.choices[0].message.content.strip()
-            current_bytes = calculate_bytes(draft_text)
+            current_bytes = calculate_bytes(draft_text, encoding_type)
             retry_count += 1
             
         return draft_text, get_status_string(current_bytes, max_bytes)
@@ -71,10 +84,10 @@ if "generated_df" not in st.session_state:
 if "selected_preset" not in st.session_state:
     st.session_state.selected_preset = "자연과학 계열"
 
-# UI 커스텀 CSS
+# UI 커스텀 CSS (기존 아이덴티티 유지)
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght=400;500;700;800&display=swap');
     html, body, [data-testid="stAppViewContainer"] {
         font-family: 'Noto Sans KR', sans-serif;
         background-color: #F4F9F4;
@@ -123,6 +136,16 @@ with st.sidebar:
     st.markdown("### 📚 담당 계열 설정")
     subject_preset = st.selectbox("작성할 활동 계열 선택", ["자연과학 계열", "공학 계열", "인문/사회 계열", "진로 탐색 활동"])
     st.session_state.selected_preset = subject_preset
+    
+    st.markdown("---")
+    st.markdown("### 🎯 [피드백 반영] 나이스 바이트 기준 설정")
+    # 💡 학교 환경에 따라 인코딩 기준을 맞춤 선택할 수 있도록 설계 옵션 추가
+    encoding_choice = st.radio(
+        "학교 나이스(NEIS) 시스템 환경",
+        ["개정 4세대 표준 (UTF-8 / 자당 3B)", "일부 구형/특수 창 (EUC-KR / 자당 2B)"],
+        index=0
+    )
+    encoding_type = "utf-8" if "UTF-8" in encoding_choice else "euc-kr"
     
     st.markdown("---")
     st.markdown("### 📊 글자 수 설정")
@@ -195,27 +218,26 @@ if uploaded_file:
         
         st.markdown("<br>", unsafe_allow_html=True)
         c_col1, c_col2, c_col3 = st.columns([1, 2, 1])
-        with c_col2: start_button = st.button("⚙️ 생기부 초안 일괄 생성 시작 (병렬 최적화 가동)", use_container_width=True)
+        with c_col2: start_button = st.button("⚙️ 생기부 초안 일괄 생성 시작 (SaaS형 하이브리드 병렬 최적화)", use_container_width=True)
             
-        # [최적화 마스터] 프롬프트 캐싱 허들(1024 토큰)을 완벽히 넘기기 위해 예시와 주의사항을 상세히 기술한 대형 시스템 고정 프롬프트 구축
         selected_guideline = preset_guidelines[subject_preset]
         master_system_prompt = f"""
-        당신은 대한민국 고등학교의 대학입시 및 학생부종합전형(학종)을 완벽하게 숙지하고 있는 20년 경력의 베테랑 교사이자 진학부장입니다.
-        학생이 제출한 날것의 활동 내용, 탐구 보고서 요약, 또는 관찰 메모를 바탕으로 학교생활기록부 '과목별 세부능력 및 특기사항(세특)' 또는 '진로활동 특기사항'에 기입할 최고 수준의 초안을 작성하십시오.
+        당신은 대한민국 고등학교의 대학입시 및 학생부종합전형(학종)을 완벽하게 숙지하고 있는 20년 경력의 베테랑 교사입니다.
+        학생이 제출한 날것의 활동 내용을 바탕으로 학교생활기록부 '과목별 세부능력 및 특기사항(세특)' 초안을 작성하십시오.
 
         [선택 계열 맞춤 강조 지침]
         {selected_guideline}
 
-        [엄격 준수 규정 및 교육부 가이드라인 명시]
-        1. 문체 제한: 모든 문장은 어떠한 예외도 없이 반드시 명사형 종결 어미인 '~함.', '~임.'으로 끝내야 합니다. '~함.', '~임.' 이외의 어미(~함 양상을 보임 등에서 '보임'은 가능하나, 평서문 어미나 영탄형 어미는 철저히 차단함) 구조만 허용합니다.
-        2. 완벽한 실명 언급 배제: 제공되는 유저 입력 내 학생 이름을 절대로 세특 생성 본문에 노출하지 마십시오. 주어를 아예 생략하고 구체적인 행동과 동기부터 서술하거나, 문맥상 주어가 반드시 필요하다면 '위 학생은', '활동 과정에서' 등으로 완전히 대체하여 작성하십시오.
-        3. 분량 극대화 및 바이트 관리: 요약 및 압축을 기본값으로 삼지 말고, 설정된 목표 한도인 {max_bytes}바이트에 최대한 가깝게(최소 {max_bytes - 150}바이트 이상) 학생의 탐구 과정과 역량을 풍부하고 상세하게 서술하십시오. 문장 사이에 인과관계와 학술적 호기심이 드러나야 합니다.
-        4. 법정 기재 금지사항 컴플라이언스 체크: 사교육 유발 요소(공인어학성적, 교외 수상실적, 해외 어학연수 등), 부모의 사회경제적 지위 암시 단어(교수, 의사, 회사 대표 등 직업명), 구체적인 대학명, 대학 교육과정 범위의 심화 논문 언급은 철저히 배제하고 걸러내어 삭제하십시오. 학교 내에서 수행 가능한 탐구 활동 수준으로 재구성합니다.
-        5. 정석적 세특 서술 구조 체계: [주제 선정 동기 및 학술적 호기심] -> [이를 해결하기 위한 구체적인 주도적 탐구 과정 및 논리적 전개, 전문 용어의 적절한 활용] -> [활동을 통해 배우고 느낀 점, 후속 탐구 의지 및 인지적 성장의 연결] 구조가 유기적인 한 편의 글로 완성되게 하십시오.
+        [엄격 준수 규정 및 가이드라인]
+        1. 문체 제한: 모든 문장은 어떠한 예외도 없이 반드시 명사형 종결 어미인 '~함.', '~임.'으로 끝내야 합니다.
+        2. 완벽한 실명 언급 배제: 제공되는 유저 입력 내 학생 이름을 절대로 세특 생성 본문에 노출하지 마십시오. 주어를 생략하거나 '위 학생은'으로 대체하십시오.
+        3. 분량 극대화 및 바이트 관리: 설정된 목표 한도인 {max_bytes}바이트에 최대한 가깝게(최소 {max_bytes - 150}바이트 이상) 학생의 역량을 풍부하고 상세하게 서술하십시오.
+        4. 법정 기재 금지사항 컴플라이언스: 사교육 유발 요소(교외 수상, 공인성적), 부모 직업 암시, 구체적인 대학명은 철저히 배제하고 삭제하십시오.
+        5. 정석적 세특 서술 구조 체계: [주제 선정 동기 및 학술적 호기심] -> [이를 해결하기 위한 구체적인 주도적 탐구 과정 및 논리적 전개] -> [활동을 통해 배우고 느낀 점, 후속 탐구 의지]
 
-        [올바른 기재 예시 참고 (Few-shot Examples)]
-        - 예시 1 (자연과학): 자율주행 자동차의 윤리적 딜레마를 주제로 트롤리 딜레마 상황에서 알고리즘의 판단 기준을 비판적으로 분석한 보고서를 제출함. 센서 데이터 인식 오류 가능성을 확률적으로 접근하여 제어 공학적 대안을 제시하는 등 학술적 깊이가 돋보임. 탐구 과정에서 기술의 사회적 책임감을 깨닫고 향후 공학도로서의 윤리적 가치관을 정립하는 계기가 됨.
-        - 예시 2 (인문사회): 현대 사회의 양극화 현상에 관한 문헌을 조사하고 소득 격차가 교육 기회의 불평등으로 이어지는 메커니즘을 사회학적 관점에서 고찰함. 통계 자료를 바탕으로 복지 정책의 실효성을 다각도로 분석하여 논리적 에세이를 전개함. 사회 문제에 대한 깊은 통찰력과 비판적 사고력이 매우 우수함.
+        [올바른 기재 예시 참고 (Few-shot)]
+        - 예시 1: 자율주행 자동차의 윤리적 딜레마를 주제로 트롤리 딜레마 상황에서 알고리즘의 판단 기준을 비판적으로 분석한 보고서를 제출함. 센서 데이터 인식 오류 가능성을 확률적으로 접근하여 제어 공학적 대안을 제시하는 등 학술적 깊이가 돋보임. 탐구 과정에서 기술의 사회적 책임감을 깨닫고 향후 공학도로서의 윤리적 가치관을 정립하는 계기가 됨.
+        - 예시 2: 현대 사회의 양극화 현상에 관한 문헌을 조사하고 소득 격차가 교육 기회의 불평등으로 이어지는 메커니즘을 사회학적 관점에서 고찰함. 통계 자료를 바탕으로 복지 정책의 실효성을 다각도로 분석하여 논리적 에세이를 전개함. 사회 문제에 대한 깊은 통찰력과 비판적 사고력이 매우 우수함.
         """
 
         if start_button:
@@ -230,7 +252,7 @@ if uploaded_file:
                 
                 progress_bar = st.progress(0)
                 status_message = st.empty()
-                status_message.info(f"⏳ 총 {total_rows}명의 세특 초안을 캐싱 인프라 및 병렬 기술로 고속 생성 중입니다...")
+                status_message.info(f"⏳ 총 {total_rows}명의 세특 초안을 고속 인프라(gpt-4o)로 생성 중입니다...")
 
                 with ThreadPoolExecutor(max_workers=5) as executor:
                     future_to_idx = {}
@@ -238,7 +260,10 @@ if uploaded_file:
                         student_name = str(row[name_col])
                         raw_content = str(row[content_col])
                         
-                        future = executor.submit(generate_student_draft, client, master_system_prompt, student_name, raw_content, max_bytes)
+                        future = executor.submit(
+                            generate_student_draft, 
+                            client, master_system_prompt, student_name, raw_content, max_bytes, encoding_type
+                        )
                         future_to_idx[future] = idx
 
                     completed_count = 0
@@ -267,7 +292,6 @@ if uploaded_file:
                 st.markdown('<div class="card-title">✨ 최종 생성 결과 검수실 (마우스 더블클릭으로 즉시 수정 가능)</div>', unsafe_allow_html=True)
                 st.info("💡 아래 테이블의 '생기부_초안' 칸을 더블클릭하면 직접 수정할 수 있습니다. 수정한 내용이 개별 재생성 및 엑셀 다운로드에 실시간 반영됩니다.")
                 
-                # [안정성 패치] key를 명시적으로 지정하여 rerun 시 화면의 편집 상태가 꼬이는 현상을 완벽히 격리 차단
                 edited_df = st.data_editor(
                     st.session_state.generated_df,
                     use_container_width=True,
@@ -299,9 +323,8 @@ if uploaded_file:
                             target_row = st.session_state.generated_df[st.session_state.generated_df[name_col] == target_student].iloc[0]
                             target_idx = st.session_state.generated_df[st.session_state.generated_df[name_col] == target_student].index[0]
                             
-                            # 일괄 생성 시 사용했던 마스터 프롬프트를 재활용하여 핀포인트 단일 갱신도 캐싱 적중 유도
                             new_text, new_status = generate_student_draft(
-                                client, master_system_prompt, target_student, target_row[content_col], max_bytes, feedback_msg=feedback_msg
+                                client, master_system_prompt, target_student, target_row[content_col], max_bytes, encoding_type, feedback_msg=feedback_msg
                             )
                             st.session_state.generated_df.at[target_idx, "생기부_초안"] = new_text
                             st.session_state.generated_df.at[target_idx, "상태_확인"] = new_status
