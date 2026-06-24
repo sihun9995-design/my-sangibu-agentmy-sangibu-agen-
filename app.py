@@ -183,7 +183,7 @@ st.markdown("""
 # 🎇 구글형 타이틀 배너
 st.markdown("""
     <div class="main-title-container">
-        <div class="main-title">생기부 올인원 검수 및 자동화 플랫폼</div>
+        <div class="main-title">생기부 작성 도움 및 자동화 플랫폼</div>
         <div class="main-subtitle">엑셀 파일을 업로드하여 가이드라인에 맞춘 초안을 기술하고 내측 실시간 교정 및 마이크로 편집을 지원합니다.</div>
     </div>
 """, unsafe_allow_html=True)
