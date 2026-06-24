@@ -137,7 +137,7 @@ with st.sidebar:
     # 🔍 [추가된 모델 선택 컴포넌트]
     model_choice = st.selectbox(
         "사용할 AI 모델 선택",
-        ["🔥 GPT-4o (마스터 고품질 모드)", "⚡ GPT-4o-mini (초가성비 고속 모드)"],
+        ["GPT-4o (고사양 모드)", "GPT-4o-mini (가성비 모드)"],
         index=0
     )
     model_name = "gpt-4o" if "GPT-4o" in model_choice else "gpt-4o-mini"
