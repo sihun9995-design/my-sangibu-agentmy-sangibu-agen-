@@ -4,7 +4,7 @@ from openai import OpenAI
 import io
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# ⚙️ [피드백 3 반영] 유연한 바이트 계산 함수 (EUC-KR / UTF-8 선택 가능)
+# ⚙️ [인코딩 최적화] 유연한 바이트 계산 함수 (EUC-KR / UTF-8 선택 가능)
 def calculate_bytes(text, encoding_type):
     if not text:
         return 0
@@ -22,7 +22,7 @@ def get_status_string(current_bytes, max_bytes):
     else:
         return f"⚠️ 부족 ({current_bytes}B)"
 
-# [최적화 마스터 V2] Prompt Caching 유지 + max_tokens + 모델 이원화 전략 적용
+# [최적화 마스터 V3] ALL gpt-4o 고정 + Prompt Caching 적중 + max_tokens 방어벽
 def generate_student_draft(client, system_prompt, student_name, raw_content, max_bytes, encoding_type, feedback_msg=None):
     try:
         if feedback_msg:
@@ -30,7 +30,7 @@ def generate_student_draft(client, system_prompt, student_name, raw_content, max
         else:
             user_prompt = f"대상 학생 이름: {student_name}\n제출된 보고서 및 관찰 메모 내용:\n{raw_content}\n\n[필수]: 위 학생의 이름을 세특 본문에 절대 언급하지 말고, 주어를 생략하여 작성하세요."
 
-        # 1차 생성: 문맥 이해도가 높은 고성능 gpt-4o 모델 활용
+        # 1차 초안 생성 (gpt-4o 고정)
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=[
@@ -38,12 +38,12 @@ def generate_student_draft(client, system_prompt, student_name, raw_content, max
                 {"role": "user", "content": user_prompt}
             ],
             temperature=0.6 if not feedback_msg else 0.5,
-            max_tokens=800 # 💡 [피드백 2 반영] 무한 생성 방지 물리 장벽
+            max_tokens=800 # 비정상적 토큰 폭발 방지 방어벽
         )
         draft_text = response.choices[0].message.content.strip()
         current_bytes = calculate_bytes(draft_text, encoding_type)
         
-        # 💡 [피드백 1 & 4 반영] 시스템 프롬프트(Prefix)를 유지하여 캐싱 할인을 받고, 비용 효율적인 gpt-4o-mini로 압축 수행
+        # 💡 [Prompt Caching 최적화] 시스템 프롬프트(Prefix)를 그대로 유지하여 캐싱 할인을 유지하며 gpt-4o로 정교한 압축 수행
         retry_count = 0
         while current_bytes > max_bytes and retry_count < 2:
             retry_user_prompt = f"""
@@ -55,13 +55,13 @@ def generate_student_draft(client, system_prompt, student_name, raw_content, max
             """
             
             response_retry = client.chat.completions.create(
-                model="gpt-4o-mini", # 💡 모델 이원화를 통한 비용 절감
+                model="gpt-4o", # 💡 gpt-4o로 품질 일관성 유지
                 messages=[
-                    {"role": "system", "content": system_prompt}, # 💡 시스템 프롬프트 일치로 Prompt Caching 적중 유도
+                    {"role": "system", "content": system_prompt}, # 💡 동일한 시스템 지침으로 Cache Miss 차단
                     {"role": "user", "content": retry_user_prompt}
                 ],
-                temperature=0.3,
-                max_tokens=600
+                temperature=0.4,
+                max_tokens=700
             )
             draft_text = response_retry.choices[0].message.content.strip()
             current_bytes = calculate_bytes(draft_text, encoding_type)
@@ -84,7 +84,7 @@ if "generated_df" not in st.session_state:
 if "selected_preset" not in st.session_state:
     st.session_state.selected_preset = "자연과학 계열"
 
-# UI 커스텀 CSS (기존 아이덴티티 유지)
+# UI 커스텀 CSS (기존 스타일 아이덴티티 유지)
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght=400;500;700;800&display=swap');
@@ -138,8 +138,7 @@ with st.sidebar:
     st.session_state.selected_preset = subject_preset
     
     st.markdown("---")
-    st.markdown("### 🎯나이스 바이트 기준 설정")
-    # 💡 학교 환경에 따라 인코딩 기준을 맞춤 선택할 수 있도록 설계 옵션 추가
+    st.markdown("### 🎯 나이스 바이트 기준 설정")
     encoding_choice = st.radio(
         "학교 나이스(NEIS) 시스템 환경",
         ["개정 4세대 표준 (UTF-8 / 자당 3B)", "일부 구형/특수 창 (EUC-KR / 자당 2B)"],
