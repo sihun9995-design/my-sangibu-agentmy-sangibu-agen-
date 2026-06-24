@@ -191,7 +191,6 @@ with col2:
 # 📊 하단 와이드 미리보기 및 로직 구동 영역
 if uploaded_file:
     try:
-        # 파일이 처음 올라오거나 세션에 원본 데이터가 없을 때 1회 로드
         df_origin = pd.read_excel(uploaded_file)
         columns_list = list(df_origin.columns)
         
@@ -269,7 +268,7 @@ if uploaded_file:
                         while current_bytes > max_bytes and retry_count < 2:
                             response_retry = client.chat.completions.create(
                                 model="gpt-4o",
-                                messages=[{"role": "system", "content": system_prompt}, {"role": "user", "f"앞서 작성된 내용이 {max_bytes}바이트를 초과했습니다. 조밀하게 압축해서 다시 써주세요.\n\n이전 내용:\n{draft_text}"}],
+                                messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": f"앞서 작성된 내용이 {max_bytes}바이트를 초과했습니다. 조밀하게 압축해서 다시 써주세요.\n\n이전 내용:\n{draft_text}"}],
                                 temperature=0.4
                             )
                             draft_text = response_retry.choices[0].message.content.strip()
@@ -285,13 +284,12 @@ if uploaded_file:
                 
                 status_message.success("🎉 모든 학생의 생기부 초안 생성이 완료되었습니다!")
                 
-                # 완성된 서식을 세션 메모리에 박제
                 working_df = df_origin[[id_col, name_col, content_col]].copy()
                 working_df["생기부_초안"] = draft_list
                 working_df["상태_확인"] = status_list
                 st.session_state.generated_df = working_df
 
-        # ----------------- ⭐ [마스터 패치] 실시간 편집 및 개별 재생성 렌더링 구역 -----------------
+        # ----------------- ⭐ 실시간 편집 및 개별 재생성 렌더링 구역 -----------------
         if st.session_state.generated_df is not None:
             st.markdown("<br>", unsafe_allow_html=True)
             
@@ -316,7 +314,6 @@ if uploaded_file:
                         client = OpenAI(api_key=openai_api_key)
                         with st.spinner(f"⏳ {target_student} 학생의 생기부를 피드백을 반영하여 다시 쓰는 중..."):
                             
-                            # 대상 행 추적
                             target_row = st.session_state.generated_df[st.session_state.generated_df[name_col] == target_student].iloc[0]
                             target_idx = st.session_state.generated_df[st.session_state.generated_df[name_col] == target_student].index[0]
                             
@@ -342,29 +339,26 @@ if uploaded_file:
                                 new_text = response.choices[0].message.content.strip()
                                 new_bytes = calculate_bytes(new_text)
                                 
-                                # 세션 데이터 갱신
                                 st.session_state.generated_df.at[target_idx, "생기부_초안"] = new_text
                                 st.session_state.generated_df.at[target_idx, "상태_확인"] = get_status_string(new_bytes, max_bytes)
                                 st.success(f"🎉 {target_student} 학생의 초안이 성공적으로 수정되었습니다!")
-                                st.rerun() # 화면 즉시 리프레시
+                                st.rerun()
                             except Exception as e:
                                 st.error(f"재생성 실패 에러: {e}")
 
-            # 2. 결과 노출 및 화면 내 더블클릭 실시간 편집기 (st.data_editor)
+            # 2. 결과 노출 및 화면 내 더블클릭 실시간 편집기
             st.markdown("<br>", unsafe_allow_html=True)
             with st.container(border=True):
                 st.markdown('<div class="card-title">✨ 최종 생성 결과 검수실 (마우스 더블클릭으로 즉시 수정 가능)</div>', unsafe_allow_html=True)
                 st.info("💡 아래 테이블의 '생기부_초안' 칸을 더블클릭하면 직접 키보드로 수정할 수 있습니다. 수정한 내용이 그대로 엑셀로 다운로드됩니다.")
                 
-                # 사용자가 수정한 내용을 실시간 동적 캡처하는 데이터 에디터 구동
                 edited_df = st.data_editor(
                     st.session_state.generated_df,
                     use_container_width=True,
-                    disabled=[id_col, name_col, content_col, "상태_확인"], # 텍스트 외 다른 칸은 실수로 못 바꾸게 락(Lock)
+                    disabled=[id_col, name_col, content_col, "상태_확인"],
                     height=400
                 )
                 
-                # 다운로드 버퍼는 사용자가 최종 수정한 edited_df를 기반으로 추출
                 out_buffer = io.BytesIO()
                 with pd.ExcelWriter(out_buffer, engine='openpyxl') as writer:
                     edited_df.to_excel(writer, index=False, sheet_name='생기부_최종본')
