@@ -134,13 +134,13 @@ with st.sidebar:
     
     st.markdown("---")
     st.markdown("### 🤖 AI 엔진 모델 선택")
-    # 🔍 [추가된 모델 선택 컴포넌트]
     model_choice = st.selectbox(
         "사용할 AI 모델 선택",
-        ["GPT-4o (고사양 모드)", "GPT-4o-mini (가성비 모드)"],
+        ["🔥 GPT-4o (마스터 고품질 모드)", "⚡ GPT-4o-mini (초가성비 고속 모드)"],
         index=0
     )
-    model_name = "gpt-4o" if "GPT-4o" in model_choice else "gpt-4o-mini"
+    # 🎯 [버그 수정 완료] 느슨한 매칭을 차단하고 mini 글자가 있을 때만 gpt-4o-mini로 분기
+    model_name = "gpt-4o-mini" if "mini" in model_choice.lower() else "gpt-4o"
     
     st.markdown("---")
     st.markdown("### 📚 담당 계열 설정")
@@ -268,7 +268,6 @@ if uploaded_file:
                         student_name = str(row[name_col])
                         raw_content = str(row[content_col])
                         
-                        # 인자에 동적으로 선택된 model_name 추가 주입
                         future = executor.submit(
                             generate_student_draft, 
                             client, master_system_prompt, student_name, raw_content, max_bytes, encoding_type, model_name
@@ -332,7 +331,6 @@ if uploaded_file:
                             target_row = st.session_state.generated_df[st.session_state.generated_df[name_col] == target_student].iloc[0]
                             target_idx = st.session_state.generated_df[st.session_state.generated_df[name_col] == target_student].index[0]
                             
-                            # 핀포인트 단일 갱신도 현재 선택된 모델명 변수(model_name)를 동적 매핑
                             new_text, new_status = generate_student_draft(
                                 client, master_system_prompt, target_student, target_row[content_col], max_bytes, encoding_type, model_name, feedback_msg=feedback_msg
                             )
