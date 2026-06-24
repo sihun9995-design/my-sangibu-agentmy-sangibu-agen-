@@ -4,9 +4,9 @@ from openai import OpenAI
 import io
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# ⚙️ [인코딩 최적화] 유연한 바이트 계산 함수
+# ⚙️ [인코딩 최적화] 유연한 바이트 계산 함수 (EUC-KR / UTF-8 선택 가능)
 def calculate_bytes(text, encoding_type):
-    if not text or pd.isna(text):
+    if not text:
         return 0
     try:
         return len(str(text).encode(encoding_type))
@@ -22,30 +22,13 @@ def get_status_string(current_bytes, max_bytes):
     else:
         return f"⚠️ 부족 ({current_bytes}B)"
 
-# 📊 [성능 최적화] 엑셀 변환 바이너리 캐싱 함수 (UI 끊김 현상 방지)
-@st.cache_data
-def convert_df_to_excel(df):
-    out_buffer = io.BytesIO()
-    with pd.ExcelWriter(out_buffer, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='생기부_최종본')
-    return out_buffer.getvalue()
-
-# 🤖 [토큰 최적화 마스터 V5] 동적 max_tokens 가이드라인 + 프롬프트 캐싱 최적화
+# [최적화 마스터 V6] 순수 텍스트 단일 병합 + 선택한 모델 동적 반영 + Prompt Caching 적중
 def generate_student_draft(client, system_prompt, student_name, raw_content, max_bytes, encoding_type, model_name, feedback_msg=None):
-    # 전처리: 데이터가 없거나 결측치인 경우 방어
-    if not raw_content or str(raw_content).strip().lower() == 'nan':
-        return "기록된 활동 내용이 없습니다.", "⚠️ 부족 (0B)"
-
     try:
         if feedback_msg:
-            user_prompt = f"대상 학생 이름: {student_name}\n원본 관찰 기록 및 소감 내용:\n{raw_content}\n\n[선생님의 추가 수정 피드백]:\n{feedback_msg}\n\n[필수]: 위 피드백을 반영하되, 학생 실명은 세특 본문에 절대 언급하지 말고 명사형 종결 어미로 작성하세요."
+            user_prompt = f"대상 학생 이름: {student_name}\n원래 관찰 기록 및 소감 내용:\n{raw_content}\n\n[선생님의 추가 수정 피드백]:\n{feedback_msg}\n\n[필수]: 위 피드백을 반영하되, 학생 실명은 세특 본문에 절대 언급하지 말고 명사형 종결 어미로 작성하세요."
         else:
             user_prompt = f"대상 학생 이름: {student_name}\n제출된 보고서 및 관찰 메모 내용:\n{raw_content}\n\n[필수]: 위 학생의 이름을 세특 본문에 절대 언급하지 말고, 주어를 생략하여 작성하세요."
-
-        # 💡 [토큰 최적화] 목표 바이트 수에 맞춰 첫 API 생성 토큰 한도를 동적으로 계산 (비용 절감)
-        # 한국어 기준 보통 1글자 = UTF-8(3B), EUC-KR(2B). GPT-4o 토크나이저는 대략 1자당 1~1.2 토큰 소모.
-        estimated_chars = max_bytes / (3 if encoding_type == 'utf-8' else 2)
-        dynamic_max_tokens = min(800, int(estimated_chars * 1.4) + 100)
 
         # 1차 초안 생성
         response = client.chat.completions.create(
@@ -55,12 +38,11 @@ def generate_student_draft(client, system_prompt, student_name, raw_content, max
                 {"role": "user", "content": user_prompt}
             ],
             temperature=0.6 if not feedback_msg else 0.5,
-            max_tokens=dynamic_max_tokens
+            max_tokens=800
         )
         draft_text = response.choices[0].message.content.strip()
         current_bytes = calculate_bytes(draft_text, encoding_type)
         
-        # 바이트 초과 시 압축 리트라이 루프 (최대 2회)
         retry_count = 0
         while current_bytes > max_bytes and retry_count < 2:
             retry_user_prompt = f"""
@@ -71,17 +53,14 @@ def generate_student_draft(client, system_prompt, student_name, raw_content, max
             {draft_text}
             """
             
-            # 리트라이 시에는 조금 더 타이트하게 토큰 제한
-            retry_max_tokens = min(700, int(estimated_chars * 1.2) + 50)
-
             response_retry = client.chat.completions.create(
                 model=model_name,
                 messages=[
                     {"role": "system", "content": system_prompt}, 
                     {"role": "user", "content": retry_user_prompt}
                 ],
-                temperature=0.3, # 압축의 정밀도를 높이기 위해 온도를 낮춤
-                max_tokens=retry_max_tokens
+                temperature=0.4,
+                max_tokens=700
             )
             draft_text = response_retry.choices[0].message.content.strip()
             current_bytes = calculate_bytes(draft_text, encoding_type)
@@ -93,7 +72,7 @@ def generate_student_draft(client, system_prompt, student_name, raw_content, max
 
 # 페이지 설정
 st.set_page_config(
-    page_title="생기부 작성 도움 및 자동화 플랫폼",
+    page_title="생기부 올인원 검수 및 자동화 플랫폼",
     page_icon="📝",
     layout="wide"
 )
@@ -104,7 +83,7 @@ if "generated_df" not in st.session_state:
 if "selected_preset" not in st.session_state:
     st.session_state.selected_preset = "자연과학 계열"
 
-# 🎨 프리미엄 미니멀리즘 인터페이스 CSS
+# UI 커스텀 CSS (구글/제미나이 룩앤필 유지)
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap');
@@ -200,15 +179,14 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 타이틀 배너
 st.markdown("""
     <div class="main-title-container">
-        <div class="main-title">생기부 작성 도움 및 자동화 플랫폼</div>
+        <div class="main-title">생기부 올인원 검수 및 자동화 플랫폼</div>
         <div class="main-subtitle">엑셀 파일을 업로드하여 가이드라인에 맞춘 초안을 기술하고 내측 실시간 교정 및 마이크로 편집을 지원합니다.</div>
     </div>
 """, unsafe_allow_html=True)
 
-# ⚙️ 사이드바 영역
+# 사이드바 영역
 with st.sidebar:
     st.markdown("### ⚙️ 시스템 설정 및 인증")
     openai_api_key = st.text_input("OpenAI API Key 입력", type="password", placeholder="sk-proj-...")
@@ -217,13 +195,13 @@ with st.sidebar:
     st.markdown("### 🤖 AI 모델 선택")
     model_choice = st.selectbox(
         "엔진 모델 지정",
-        ["🔥 GPT-4o ", "⚡ GPT-4o-mini "],
+        ["🔥 GPT-4o (마스터 고품질 모드)", "⚡ GPT-4o-mini (초가성비 고속 모드)"],
         index=0
     )
     model_name = "gpt-4o-mini" if "mini" in model_choice.lower() else "gpt-4o"
     
     st.markdown("---")
-    st.markdown("### 👥 맞춤 생기부 계열")
+    st.markdown("### 👥 담당 관리")
     subject_preset = st.selectbox("활동 분석 계열 설정", ["자연과학 계열", "공학 계열", "인문/사회 계열", "진로 탐색 활동"])
     st.session_state.selected_preset = subject_preset
     
@@ -240,7 +218,7 @@ with st.sidebar:
     st.markdown("### 📊 분량 한계 설정")
     max_bytes = st.slider("최대 허용 바이트 (한도: 1500)", min_value=1000, max_value=1450, value=1350, step=50)
 
-# 계열 프리셋 가이드라인
+# 프리셋 지침
 preset_guidelines = {
     "자연과학 계열": "과학적 호기심, 가설 설정 및 탐구 실험 과정, 객관적 데이터 분석 및 논리적 결론 도출 역량을 중심으로 서술하십시오.",
     "공학 계열": "공학적 문제해결력, 기술적 대안 설계 및 프로토타입 구상, 실용적 구현 가능성 및 테크놀로지 접목 능력을 중심으로 서술하십시오.",
@@ -248,7 +226,6 @@ preset_guidelines = {
     "진로 탐색 활동": "학생의 구체적인 진로 희망 및 전공 분야와의 유기적 연계성, 자기주도적인 학업 탐색 태도와 향후 발전 가능성을 중심으로 서술하십시오."
 }
 
-# 🧩 메인 레이아웃
 col1, col2 = st.columns([1, 1])
 
 with col1:
@@ -259,16 +236,15 @@ with col1:
         sample_df = pd.DataFrame({
             "학번": [10101, 10102],
             "이름": ["홍길동", "이순신"],
-            "보고서내용": ["자율주행 자동차의 윤리적 딜레마 보고서를 제출함.", "효소 촉매 반응 실험을 주도하고 시각화함."]
+            "보고서내용": ["자율주행 자동차 보고서 제출함.", "효소 촉매 반응 실험을 주도함."],
+            "발표및참여도": ["딜레마 제안 발표 역량이 우수함.", "시각화 데이터를 급우들에게 논리적으로 설명함."]
         })
-        
-        # 샘플 엑셀 파일 다운로드 부분도 가볍게 처리
-        sample_buffer = io.BytesIO()
-        with pd.ExcelWriter(sample_buffer, engine='openpyxl') as writer:
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
             sample_df.to_excel(writer, index=False)
             
         st.markdown("<br>", unsafe_allow_html=True)
-        st.download_button(label="📥 엑셀 입력양식 샘플 다운로드", data=sample_buffer.getvalue(), file_name="생기부_입력양식_샘플.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        st.download_button(label="📥 엑셀 입력양식 샘플 다운로드", data=buffer.getvalue(), file_name="생기부_입력양식_샘플.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 with col2:
     with st.container(border=True):
@@ -276,9 +252,9 @@ with col2:
         st.markdown(f"""
             <div class="rule-item"><b>지정 엔지니어링:</b> {model_name.upper()}</div>
             <div class="rule-item"><b>매핑 타겟 그룹:</b> {subject_preset}</div>
-            <div class="rule-item"><b>문체 준수:</b> 전체 명사형 종결 어미 (~함., ~임.) 마감 처리 강제</div>
+            <div class="rule-item"><b>문체 준수:</b> 전체 명사형 종결 어미 마감 처리 강제</div>
             <div class="rule-item"><b>개인정보 배제:</b> 본문 영역 내 학생 실명 완벽 제어 및 삭제</div>
-            <div class="rule-item"><b>컴플라이언스 필터:</b> 사교육 유발 단어, 교외 실적, 부모 지위, 대학명 전면 차단</div>
+            <div class="rule-item"><b>컴플라이언스 필터:</b> 사교육 유발 요소, 대학명 전면 차단</div>
         """, unsafe_allow_html=True)
 
 if uploaded_file:
@@ -288,11 +264,14 @@ if uploaded_file:
         
         id_keywords = ['학번', '번호', '학생번호', 'id', 'no', '학적', 'num']
         name_keywords = ['이름', '성명', '학생명', '학생 이름', 'name']
-        content_keywords = ['보고서내용', '내용', '보고서', '특기사항', '세특', '활동', '관찰', '메모', 'content', '기술', '기록']
+        content_keywords = ['보고서내용', '내용', '보고서', '특기사항', '세특', '활동', '관찰', '메모', 'content', '기술', '기록', '발표', '참여', '평가']
         
         default_id_col = next((c for c in columns_list if any(k in str(c).lower() for k in id_keywords)), columns_list[0])
         default_name_col = next((c for c in columns_list if any(k in str(c).lower() for k in name_keywords)), columns_list[1] if len(columns_list) > 1 else columns_list[0])
-        default_content_col = next((c for c in columns_list if any(k in str(c).lower() for k in content_keywords)), columns_list[2] if len(columns_list) > 2 else columns_list[0])
+        
+        default_content_cols = [c for c in columns_list if any(k in str(c).lower() for k in content_keywords)]
+        if not default_content_cols and len(columns_list) > 2:
+            default_content_cols = [columns_list[2]]
         
         st.markdown("<br>", unsafe_allow_html=True)
         with st.container(border=True):
@@ -300,7 +279,8 @@ if uploaded_file:
             sel_col1, sel_col2, sel_col3 = st.columns(3)
             with sel_col1: id_col = st.selectbox("📌 학번 인덱스 열", columns_list, index=columns_list.index(default_id_col))
             with sel_col2: name_col = st.selectbox("📌 성명 인덱스 열", columns_list, index=columns_list.index(default_name_col))
-            with sel_col3: content_col = st.selectbox("📌 특기사항 소스 데이터 열", columns_list, index=columns_list.index(default_content_col))
+            with sel_col3: 
+                content_cols = st.multiselect("📌 특기사항 소스 데이터 열 (복수 선택 가능)", columns_list, default=default_content_cols)
 
         st.markdown("<br>", unsafe_allow_html=True)
         with st.container(border=True):
@@ -314,7 +294,7 @@ if uploaded_file:
         selected_guideline = preset_guidelines[subject_preset]
         master_system_prompt = f"""
         당신은 대한민국 고등학교의 대학입시 및 학생부종합전형(학종)을 완벽하게 숙지하고 있는 20년 경력의 베테랑 교사입니다.
-        학생이 제출한 날것의 활동 내용을 바탕으로 학교생활기록부 '과목별 세부능력 및 특기사항(세특)' 초안을 작성하십시오.
+        제공되는 활동 소스 내용들을 하나의 유기적이고 완벽한 학교생활기록부 '과목별 세부능력 및 특기사항(세특)' 초안으로 직조하십시오.
         [선택 계열 맞춤 강조 지침] {selected_guideline}
         [엄격 준수 규정 및 가이드라인]
         1. 문체 제한: 모든 문장은 어떠한 예외도 없이 반드시 명사형 종결 어미인 '~함.', '~임.'으로 끝내야 합니다.
@@ -327,6 +307,8 @@ if uploaded_file:
         if start_button:
             if not openai_api_key:
                 st.warning("🔑 왼쪽 사이드바에 OpenAI API Key를 먼저 입력해주세요.")
+            elif not content_cols:
+                st.error("⚠️ 소스 데이터 열을 최소 한 개 이상 선택해주세요.")
             else:
                 client = OpenAI(api_key=openai_api_key)
                 total_rows = len(df_origin)
@@ -338,12 +320,13 @@ if uploaded_file:
                 status_message = st.empty()
                 status_message.info(f"⏳ 총 {total_rows}명의 데이터 세트를 {model_name.upper()} 핵심 코어로 병렬 변환 처리 중...")
 
-                # 💡 [성능 최적화] max_workers 속도를 12로 상향하여 대기시간 단축
-                with ThreadPoolExecutor(max_workers=12) as executor:
+                with ThreadPoolExecutor(max_workers=5) as executor:
                     future_to_idx = {}
                     for idx, row in df_origin.iterrows():
                         student_name = str(row[name_col])
-                        raw_content = str(row[content_col])
+                        
+                        # 🛠️ [최적화 변경 부분] 말머리표 다 떼어내고, 빈칸이 아닌 내용만 순수하게 공백 단위로 엮어 하나의 텍스트로 합칩니다.
+                        raw_content = " ".join([str(row[col]).strip() for col in content_cols if pd.notna(row[col])])
                         
                         future = executor.submit(
                             generate_student_draft, 
@@ -363,7 +346,7 @@ if uploaded_file:
                 
                 status_message.success(f"🎉 동적 파이프라인 처리가 완료되었습니다. (사용한 모델: {model_name.upper()})")
                 
-                working_df = df_origin[[id_col, name_col, content_col]].copy()
+                working_df = df_origin[[id_col, name_col] + content_cols].copy()
                 working_df["생기부_초안"] = draft_list
                 working_df["상태_확인"] = status_list
                 st.session_state.generated_df = working_df
@@ -380,7 +363,7 @@ if uploaded_file:
                 edited_df = st.data_editor(
                     st.session_state.generated_df,
                     use_container_width=True,
-                    disabled=[id_col, name_col, content_col, "상태_확인"],
+                    disabled=[id_col, name_col, "상태_확인"] + content_cols,
                     height=350,
                     key="student_se_editor"
                 )
@@ -394,7 +377,7 @@ if uploaded_file:
                 student_options = st.session_state.generated_df[name_col].tolist()
                 tgt_col1, tgt_col2 = st.columns([1, 2])
                 with tgt_col1: target_student = st.selectbox("🎯 대상 타겟 선택", student_options)
-                with tgt_col2: feedback_msg = st.text_input("💡 핀포인트 전용 마이크로 수정 피드백 지시사항", placeholder="예: 탐구 과정의 공학적 도출 한계를 극복하기 위해 추가 문헌 분석을 거친 내역을 상세화해줘.")
+                with tgt_col2: feedback_msg = st.text_input("💡 핀포인트 전용 마이크로 수정 피드백 지시사항", placeholder="예: 발표와 보고서 내용을 더 촘촘하게 엮어줘.")
                 
                 if st.button("선택 대상을 타겟으로 재가동"):
                     if not openai_api_key:
@@ -408,26 +391,30 @@ if uploaded_file:
                             target_row = st.session_state.generated_df[st.session_state.generated_df[name_col] == target_student].iloc[0]
                             target_idx = st.session_state.generated_df[st.session_state.generated_df[name_col] == target_student].index[0]
                             
+                            # 🛠️ [최적화 변경 부분] 핀포인트 단일 재생성 시에도 동일하게 순수 공백 단위로 텍스트를 하나로 합침
+                            raw_content = " ".join([str(target_row[col]).strip() for col in content_cols if pd.notna(target_row[col])])
+                            
                             new_text, new_status = generate_student_draft(
-                                client, master_system_prompt, target_student, target_row[content_col], max_bytes, encoding_type, model_name, feedback_msg=feedback_msg
+                                client, master_system_prompt, target_student, raw_content, max_bytes, encoding_type, model_name, feedback_msg=feedback_msg
                             )
                             st.session_state.generated_df.at[target_idx, "생기부_초안"] = new_text
                             st.session_state.generated_df.at[target_idx, "상태_확인"] = new_status
                             
-                            # 💡 세특 데이터가 갱신되었으므로 캐시를 지우기 위해 session_state 재할당 후 리런
                             st.success(f"🎉 {target_student} 학생의 결과물이 최적화 필터링되어 보완 완료되었습니다.")
                             st.rerun()
 
-            # 💡 [성능 최적화] 무거운 엑셀 빌드 로직을 캐싱 함수로 교체하여 불필요한 재연산 제거
-            excel_data = convert_df_to_excel(st.session_state.generated_df)
-            
+            # 마스터 엑셀 다운로드 빌드
+            out_buffer = io.BytesIO()
+            with pd.ExcelWriter(out_buffer, engine='openpyxl') as writer:
+                st.session_state.generated_df.to_excel(writer, index=False, sheet_name='생기부_최종본')
+                
             st.markdown("<br>", unsafe_allow_html=True)
             st.download_button(
                 label="📥 최종 화면 교정본 반영 마스터 엑셀 다운로드",
-                data=excel_data,
-                file_name=f"생기부_작성안_{model_name}_최종결과.xlsx",
+                data=out_buffer.getvalue(),
+                file_name=f"생기부_올인원마스터_{model_name}_최종결과.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-                            
+                    
     except Exception as e:
         st.error(f"파일 처리 중 오류 발생: {e}")
