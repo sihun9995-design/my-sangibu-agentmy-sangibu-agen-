@@ -73,7 +73,7 @@ def generate_student_draft(client, system_prompt, student_name, raw_content, max
 
 # 페이지 설정
 st.set_page_config(
-    page_title="생기부 올인원 검수 및 자동화 플랫폼",
+    page_title="생기부 작성 도움 및 자동화 플랫폼",
     page_icon="📝",
     layout="wide"
 )
@@ -403,7 +403,7 @@ if uploaded_file:
             st.download_button(
                 label="📥 최종 화면 교정본 반영 마스터 엑셀 다운로드",
                 data=out_buffer.getvalue(),
-                file_name=f"생기부_올인원마스터_{model_name}_최종결과.xlsx",
+                file_name=f"생기부_작성안_{model_name}_최종결과.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
                     
