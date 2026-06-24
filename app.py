@@ -138,7 +138,7 @@ with st.sidebar:
     st.session_state.selected_preset = subject_preset
     
     st.markdown("---")
-    st.markdown("### 🎯 [피드백 반영] 나이스 바이트 기준 설정")
+    st.markdown("### 🎯나이스 바이트 기준 설정")
     # 💡 학교 환경에 따라 인코딩 기준을 맞춤 선택할 수 있도록 설계 옵션 추가
     encoding_choice = st.radio(
         "학교 나이스(NEIS) 시스템 환경",
