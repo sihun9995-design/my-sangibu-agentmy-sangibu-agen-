@@ -16,7 +16,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# 🎨 그린/토끼 컨셉 반영 및 테두리 상자(Container) 내부 정렬용 커스텀 CSS
+# 🎨 그린/토끼 컨셉 및 테두리 상자 커스텀 CSS
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap');
@@ -50,7 +50,7 @@ st.markdown("""
         font-weight: 500;
     }
     
-    /* ⭐ 스트림릿 기본 테두리 상자를 화이트 카드로 커스텀 리모델링 (내부 가두기 핵심) */
+    /* 스트림릿 기본 테두리 상자를 화이트 카드로 커스텀 리모델링 */
     div[data-testid="stVerticalBlockBorderWrapper"] {
         background-color: white !important;
         border: 1px solid #C8E6C9 !important;
@@ -113,6 +113,16 @@ with st.sidebar:
     st.markdown("---")
     openai_api_key = st.text_input("OpenAI API Key 입력", type="password", placeholder="sk-proj-...")
     
+    st.markdown("---")
+    st.markdown("### 📚 담당 계열 설정")
+    # 4가지 진로/과목 계열 선택 드롭다운 메뉴 추가
+    subject_preset = st.selectbox(
+        "작성할 활동 계열 선택",
+        ["자연과학 계열", "공학 계열", "인문/사회 계열", "진로 탐색 활동"]
+    )
+    
+    st.markdown("---")
+    st.markdown("### 📊 글자 수 설정")
     max_bytes = st.slider(
         "최대 허용 바이트 (나이스 한도: 1500)",
         min_value=1000, max_value=1450, value=1350, step=50
@@ -120,16 +130,22 @@ with st.sidebar:
     st.markdown("---")
     st.caption("🔒 본 시스템은 입력된 데이터를 수집하지 않는 안전한 휘발성 에이전트입니다.")
 
+# 계열 프리셋별 맞춤형 강조 가이드라인 사전정의
+preset_guidelines = {
+    "자연과학 계열": "과학적 호기심, 가설 설정 및 탐구 실험 과정, 객관적 데이터 분석 및 논리적 결론 도출 역량을 중심으로 서술하십시오.",
+    "공학 계열": "공학적 문제해결력, 기술적 대안 설계 및 프로토타입 구상, 실용적 구현 가능성 및 테크놀로지 접목 능력을 중심으로 서술하십시오.",
+    "인문/사회 계열": "사회 현상에 대한 비판적 사고력, 문헌 및 텍스트 분석 능력, 인문학적 통찰과 논리적 에세이 전개 능력을 중심으로 서술하십시오.",
+    "진로 탐색 활동": "학생의 구체적인 진로 희망 및 전공 분야와의 유기적 연계성, 자기주도적인 학업 탐색 태도와 향후 발전 가능성을 중심으로 서술하십시오."
+}
+
 # 🧩 메인 레이아웃 (상단 2분할 구조)
 col1, col2 = st.columns([1, 1])
 
 with col1:
-    # 테두리 컨테이너 내부로 업로더와 샘플 다운로드를 완벽히 격리
     with st.container(border=True):
         st.markdown('<div class="card-title">🐰 1. 데이터 업로드</div>', unsafe_allow_html=True)
         uploaded_file = st.file_uploader("학생 데이터 엑셀 파일(.xlsx)을 선택하세요", type=["xlsx"])
         
-        # 샘플 파일 다운로드 구조
         sample_df = pd.DataFrame({
             "학번": [10101, 10102],
             "이름": ["홍길동", "이순신"],
@@ -148,14 +164,14 @@ with col1:
         )
 
 with col2:
-    # 테두리 컨테이너 내부로 가이드라인 컴포넌트 격리
     with st.container(border=True):
         st.markdown('<div class="card-title">🐰 2. 가이드라인 규칙</div>', unsafe_allow_html=True)
-        st.markdown("""
+        st.markdown(f"""
+            <div class="rule-item"><b>🎯 선택된 프리셋:</b> <span style='color:#2E7D32; font-weight:bold;'>{subject_preset}</span></div>
             <div class="rule-item"><b>🐰 문체 제한:</b> 모든 문장의 반드시 명사형 종결 어미(~함., ~임.)로 종결</div>
             <div class="rule-item"><b>🐰 실명 배제:</b> 문장 내부에서 학생의 실명을 절대 언급하지 않음</div>
             <div class="rule-item"><b>🐰 컴플라이언스:</b> 사교육 유발 요소, 교외 수상, 부모 직업, 대학명 차단</div>
-            <div class="rule-item"><b>🐰 문항 극대화:</b> 설정된 바이트 제한 한도 내에서 최대한 조밀하고 풍부하게 서술</div>
+            <div class="rule-item"><b>🐰 문항 극대화:</b> 설정된 바이트 제한 한도 내에서 최대한 풍부하게 서술</div>
         """, unsafe_allow_html=True)
 
 # 📊 하단 와이드 미리보기 및 로직 구동 영역
@@ -172,7 +188,6 @@ if uploaded_file:
                 st.markdown('<div class="card-title">📊 업로드된 학생 데이터 미리보기</div>', unsafe_allow_html=True)
                 st.dataframe(df, use_container_width=True)
             
-            # 레이아웃을 이용한 하단 정중앙 버튼 배치
             st.markdown("<br>", unsafe_allow_html=True)
             c_col1, c_col2, c_col3 = st.columns([1, 2, 1])
             with c_col2:
@@ -186,27 +201,33 @@ if uploaded_file:
                     
                     draft_list = []
                     byte_list = []
+                    status_list = [] # 신호등 저장용 리스트
                     
                     progress_bar = st.progress(0)
                     status_message = st.empty()
                     total_rows = len(df)
                     
+                    selected_guideline = preset_guidelines[subject_preset]
+                    
                     for idx, row in df.iterrows():
                         student_name = row["이름"]
                         raw_content = row["보고서내용"]
                         
-                        status_message.info(f"⏳ [{idx+1}/{total_rows}] {student_name} 학생 생기부 생성 중...")
+                        status_message.info(f"⏳ [{idx+1}/{total_rows}] {student_name} 학생 ({subject_preset}) 생성 중...")
                         
                         system_prompt = f"""
                         당신은 대한민국 고등학교의 대학입시 및 학생부종합전형을 완벽하게 숙지하고 있는 베테랑 교사입니다.
                         학생이 제출한 날것의 '보고서내용'을 바탕으로, 학교생활기록부 '과목별 세부능력 및 특기사항(세특)'에 기입할 완성도 높은 초안을 작성하십시오.
 
+                        [선택 계열 맞춤 강조 지침]
+                        {selected_guideline}
+
                         [엄격 준수 규칙]
-                        1. 문체: 모든 문장은 예외 없이 반드시 명사형 종결 어미인 '~함.', '~임.'으로 끝내야 합니다. (~했음, ~하였음 등은 금지하며 오직 ~함., ~임. 구조만 허용)
-                        2. 실명 언급 금지: 생성되는 텍스트 내부에서 학생의 이름(예: '{student_name}', '{student_name} 학생은')을 절대로 언급하지 마십시오. 주어가 필요한 경우 '위 학생은', '본인은' 등으로 대체하거나 아예 생략하십시오.
+                        1. 문체: 모든 문장은 예외 없이 반드시 명사형 종결 어미인 '~함.', '~임.'으로 끝내야 합니다. 오직 ~함., ~임. 구조만 허용합니다.
+                        2. 실명 언급 금지: 생성되는 텍스트 내부에서 학생의 이름(예: '{student_name}', '{student_name} 학생은')을 절대로 언급하지 마십시오. 주어가 필요한 경우 '위 학생은' 등으로 대체하거나 아예 생략하십시오.
                         3. 분량 및 바이트 극대화: 서술 내용을 축약하지 말고, 설정된 최대 제한 분량인 {max_bytes}바이트에 최대한 가깝도록(최소 {max_bytes - 150}바이트 이상, 목표치의 90% 이상 수준) 탐구 과정과 학업적 성장을 매우 구체적이고 풍부하게 풀어써서 분량을 꽉 채우십시오.
-                        4. 컴플라이언스: 사교육 유발 요소(소논문, 교외 수상 기록, 공인어학시험, 사설 학원 연계 활동), 부모의 사회경제적 지위 암시 단어, 구체적인 대학명 및 교육청 외의 기관명은 철저히 배제하고 삭제하십시오.
-                        5. 서술 구조: 주제 선정 동기 -> 구체적인 탐구 과정 및 논리적 전개 -> 배우고 느낀 점 및 학생의 인지적 성장이 유기적이고 밀도 있게 연결되도록 작성하십시오.
+                        4. 컴플라이언스: 사교육 유발 요소, 부모의 사회경제적 지위 암시 단어, 구체적인 대학명은 철저히 배제하고 삭제하십시오.
+                        5. 서술 구조: 주제 선정 동기 -> 구체적인 탐구 과정 및 논리적 전개 -> 배우고 느낀 점 및 인지적 성장이 유기적으로 연결되도록 작성하십시오.
                         """
                         
                         user_prompt = f"제출된 보고서 및 관찰 메모 내용:\n{raw_content}"
@@ -240,21 +261,30 @@ if uploaded_file:
                             draft_list.append(draft_text)
                             byte_list.append(current_bytes)
                             
+                            # 🚥 바이트 신호등 판정 조건 판별
+                            if current_bytes > max_bytes:
+                                status_list.append(f"❌ 초과 ({current_bytes}B)")
+                            elif current_bytes >= (max_bytes - 150):
+                                status_list.append(f"✅ 적정 ({current_bytes}B)")
+                            else:
+                                status_list.append(f"⚠️ 부족 ({current_bytes}B)")
+                                
                         except Exception as e:
                             draft_list.append(f"오류 발생 ({str(e)})")
                             byte_list.append(0)
+                            status_list.append("❌ 에러")
                             
                         progress_bar.progress((idx + 1) / total_rows)
                         
                     status_message.success("🎉 모든 학생의 생기부 초안 생성이 완료되었습니다!")
                     
                     df["생기부_초안"] = draft_list
-                    df["사용_바이트"] = byte_list
+                    df["상태_확인"] = status_list # 결과 열 매핑
                     
                     st.markdown("<br>", unsafe_allow_html=True)
                     with st.container(border=True):
                         st.markdown('<div class="card-title">✨ 자동 생성 결과 (미리보기)</div>', unsafe_allow_html=True)
-                        st.dataframe(df[["학번", "이름", "생기부_초안", "사용_바이트"]], use_container_width=True)
+                        st.dataframe(df[["학번", "이름", "생기부_초안", "상태_확인"]], use_container_width=True)
                         
                         out_buffer = io.BytesIO()
                         with pd.ExcelWriter(out_buffer, engine='openpyxl') as writer:
@@ -263,7 +293,7 @@ if uploaded_file:
                         st.download_button(
                             label="📥 변환된 최종 엑셀 파일 다운로드",
                             data=out_buffer.getvalue(),
-                            file_name="생기부_그린버전_완료.xlsx",
+                            file_name=f"생기부_{subject_preset.replace(' ', '_')}_완료.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                         )
                     
